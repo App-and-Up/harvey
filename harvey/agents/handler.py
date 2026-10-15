@@ -13,7 +13,9 @@ from datetime import datetime, timezone
 from harvey.brain import Brain, BrainUnavailable
 from harvey.config import HarveyConfig, EnvConfig
 from harvey.integrations.instantly import InstantlyClient
-from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
+from harvey.integrations.mail_provider import (
+    NATIVE_PROVIDERS, get_mail_provider, strip_quoted_reply,
+)
 from harvey.models.conversation import Conversation, Message
 from harvey.state import StateManager
 
@@ -57,6 +59,15 @@ OPT_OUT_PATTERNS = (
     "never contact",
     "delete my info",
     "delete my data",
+    "no thanks",
+    "no thank you",
+    "no grazie",
+    "non contattatemi",
+    "non contattarmi",
+    "non scrivetemi",
+    "non scrivermi",
+    "cancellami",
+    "cancellatemi",
 )
 
 # Phrases that mean a human must take over. Never auto-reply to these.
@@ -202,6 +213,9 @@ class Handler:
         reply_meta: dict | None = None,
     ):
         """Classify, record, and respond to a single reply."""
+        # Classify only the prospect's own text, never our quoted footer.
+        reply_text = strip_quoted_reply(reply_text)
+
         # Find the prospect by email (indexed lookup)
         prospect = await self.state.get_prospect_by_email(lead_email)
         if not prospect:

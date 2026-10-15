@@ -853,8 +853,12 @@ class StateManager:
         status: str | None = None,
         due_before: str | None = None,
         limit: int = 200,
+        kind: str | None = None,
     ) -> list[dict]:
         where, params = [], []
+        if kind:
+            where.append("kind = ?")
+            params.append(kind)
         if status:
             where.append("status = ?")
             params.append(status)

@@ -6,6 +6,11 @@ Skills are editable Markdown files that give Harvey foundational sales knowledge
 
 When an agent runs, it calls `brain.load_skills_for_agent("agent_name")` which concatenates the relevant skill files and injects them into the prompt. This means you can change Harvey's behavior by editing these files — no code changes needed.
 
+`unslop.md` is injected by `Brain.think` for writing, reply handling,
+personalization and product training. Harvey loads it on each call, so edits
+apply to the next generated text. Its audit runs within the same model call;
+JSON structure, status labels, numbers and business constraints take precedence.
+
 ## Skill → Agent Mapping
 
 | Skill | Scout | Writer | Handler | Sender | LinkedIn |

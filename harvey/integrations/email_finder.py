@@ -355,7 +355,8 @@ async def verify_reoon(email: str, api_key: str) -> Optional[dict]:
     """Reoon email-verifier — generous free tier, good catch-all flagging.
 
     Returns {'status': ..., 'catch_all': bool} or None if unavailable.
-    Reoon 'status' values: valid / invalid / disabled / catch_all / unknown.
+    Power mode returns safe / invalid / disabled / disposable / inbox_full /
+    catch_all / role_account / spamtrap / unknown. Quick mode uses valid.
     """
     try:
         async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
@@ -374,7 +375,15 @@ async def verify_reoon(email: str, api_key: str) -> Optional[dict]:
         return None
     if not isinstance(data, dict):
         return None
-    status = str(data.get("status") or "").lower()
+    status = str(data.get("status") or "").strip().lower()
+    # Power mode's positive verdict is "safe", not quick mode's "valid".
+    # Preserve catch-all detection: our send policy still treats it as risky.
+    if status == "safe":
+        status = "valid"
+        if data.get("is_safe_to_send") is False or data.get("is_deliverable") is False:
+            status = "unknown"
+    if any(data.get(flag) is True for flag in ("is_disposable", "is_spamtrap", "is_disabled")):
+        status = "invalid"
     is_catch_all = bool(data.get("is_catch_all") or status == "catch_all")
     return {"status": status, "catch_all": is_catch_all}
 
@@ -473,13 +482,13 @@ async def detect_catch_all(domain: str) -> Optional[bool]:
 
 def _status_from_verdict(verdict: dict) -> Optional[str]:
     """Map a provider verdict dict to our status, or None if inconclusive."""
+    status = verdict.get("status", "")
+    if status in ("invalid", "undeliverable", "disabled", "disposable", "spamtrap"):
+        return "invalid"
     if verdict.get("catch_all"):
         return "risky"
-    status = verdict.get("status", "")
     if status in ("valid", "deliverable"):
         return "verified"
-    if status in ("invalid", "undeliverable", "disabled"):
-        return "invalid"
     if status in ("catch_all", "catch-all", "accept_all"):
         return "risky"
     return None  # unknown / risky-unknown — inconclusive

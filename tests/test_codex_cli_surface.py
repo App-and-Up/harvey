@@ -25,10 +25,12 @@ import threading
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
 import harvey.codex as hc
+from tests.test_codex_subscription_text import subscription_http, response_stream
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("HARVEY_CODEX_CLI_TESTS") != "1" or not shutil.which("codex")
@@ -189,9 +191,10 @@ async def test_real_cli_model_sees_no_tools_and_no_inherited_instructions(mock_c
     request = mock_codex.requests[0]
     assert _model_visible_tools(request) == []
     assert not request.get("instructions")
-    roles = [(i.get("type"), i.get("role")) for i in request["input"]]
+    messages = [i for i in request["input"] if i.get("type") == "message"]
+    roles = [(i.get("type"), i.get("role")) for i in messages]
     assert roles == [("message", "developer"), ("message", "user")]
-    assert request["input"][0]["content"][0]["text"] == hc.DEVELOPER_INSTRUCTIONS
+    assert messages[0]["content"][0]["text"] == hc.DEVELOPER_INSTRUCTIONS
 
 
 @pytest.mark.asyncio
@@ -222,23 +225,49 @@ async def test_real_cli_inherited_mcp_server_never_starts(mock_codex, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_real_cli_code_mode_models_are_refused(mock_codex):
-    catalog = None
-    client = hc.CodexClient(native_home=mock_codex.native_home)
-    server = hc._AppServer(client._resolve_codex())
-    try:
-        server.prepare()
-        catalog = await server.read_catalog(hc.time.monotonic() + 30)
-    finally:
-        await server.close()
-    code_mode = [slug for slug, m in catalog.items() if not hc.model_tools_removable(m)]
-    if not code_mode:
-        pytest.skip("this Codex catalog has no code-mode models")
-    with pytest.raises(hc.CodexError) as err:
-        await hc.CodexClient(model=code_mode[0], native_home=mock_codex.native_home).run(
-            "ping", timeout=60)
-    assert err.value.kind == "isolation"
-    assert mock_codex.requests == []
+@pytest.mark.parametrize("selection", ["explicit", "omitted", "blank", "null"])
+async def test_real_cli_all_catalog_models_and_config_defaults(
+        mock_codex, monkeypatch, tmp_path, selection, subscription_http):
+    import yaml
+
+    from harvey.brain import Brain
+    from harvey.config import load_config
+    from harvey.state import StateManager
+
+    monkeypatch.setattr(hc, "DISABLED_FEATURES",
+                        hc.DISABLED_FEATURES + ("enable_request_compression",))
+    catalog = hc.parse_model_catalog(json.dumps(_bundled_catalog(tmp_path)).encode())
+    expected_default = hc.pick_default_model(hc.text_only_catalog(catalog))
+    models = list(catalog) if selection == "explicit" else [None]
+    text_calls, _, text_response = subscription_http
+    for model in models:
+        mock_codex.requests.clear()
+        text_calls.clear()
+        expected = model if selection == "explicit" else expected_default
+        text_response["body"] = response_stream(model=expected)
+        config_data = yaml.safe_load((Path(__file__).parents[1] / "harvey.yaml").read_text())
+        config_data["brain"] = {"provider": "codex"}
+        if selection != "omitted":
+            config_data["brain"]["model"] = model if selection == "explicit" else (
+                "" if selection == "blank" else None)
+        config_path = tmp_path / "selection.yaml"
+        config_path.write_text(yaml.safe_dump(config_data))
+        config = load_config(str(config_path))
+        brain = Brain(StateManager(str(tmp_path / "unused.db")), config.brain)
+        result = await brain.codex.run("ping", timeout=60)
+        assert result.text == "PONG" and result.model == expected
+        if model in hc.SUBSCRIPTION_TEXT_MODELS:
+            # Explicit Luna uses HTTP after the real CLI attests its catalog.
+            assert mock_codex.requests == []
+            assert len(text_calls) == 1
+            request = json.loads(text_calls[0].content)
+            assert request["model"] == expected
+            assert request["tools"] == [] and request["tool_choice"] == "none"
+        else:
+            assert text_calls == []
+            assert len(mock_codex.requests) == 1
+            assert mock_codex.requests[0]["model"] == expected
+            assert _model_visible_tools(mock_codex.requests[0]) == []
 
 
 # ── route: hostile endpoints never receive the login ──
@@ -346,7 +375,7 @@ async def test_real_cli_control_attacker_would_see_the_login(attacker, monkeypat
     deliver the (fake) login to the attacker — so the test above is real."""
     top, tables = _hostile_routes(attacker.base)["chatgpt_base_url"]
     attacker.configure(top, tables)
-    monkeypatch.setattr(hc, "attest_effective_config", lambda response: [])
+    monkeypatch.setattr(hc, "attest_effective_config", lambda response, model_catalog_path="": [])
     with pytest.raises(hc.CodexError):
         await hc.CodexClient(native_home=attacker.native_home).read_rate_limits(timeout=60)
     assert attacker.saw_login()
@@ -391,15 +420,11 @@ async def test_real_cli_unlisted_toolless_model_only_runs_when_explicit(
     if not toolless:
         pytest.skip("this Codex catalog has no tool-less model")
     for m in catalog["models"]:
-        m["visibility"] = "hide" if hc.model_tools_removable(m) else m.get("visibility")
-    path = tmp_path / "catalog.json"
-    path.write_text(json.dumps(catalog))
-    # Test-only stand-in for a remote catalog; real configs may not set it.
-    monkeypatch.setattr(hc, "MUST_BE_EMPTY", tuple(
-        k for k in hc.MUST_BE_EMPTY if k != "model_catalog_json"))
-    with_mock = hc.build_private_config_toml
-    monkeypatch.setattr(hc, "build_private_config_toml",
-                        lambda: f"model_catalog_json = {json.dumps(str(path))}\n" + with_mock())
+        m["visibility"] = "hide"
+    # Stand in for the backend catalog without relaxing config attestation.
+    async def read_catalog(self, deadline):
+        return hc.parse_model_catalog(json.dumps(catalog).encode())
+    monkeypatch.setattr(hc._AppServer, "read_catalog", read_catalog)
 
     with pytest.raises(hc.CodexError) as err:
         await hc.CodexClient(native_home=mock_codex.native_home).run("ping", timeout=60)
@@ -421,8 +446,12 @@ async def test_real_cli_preflight_checks_the_model_without_inference(mock_codex,
                         hc.DISABLED_FEATURES + ("enable_request_compression",))
     await hc.CodexClient(model="gpt-5.5", native_home=mock_codex.native_home).preflight(timeout=60)
     assert mock_codex.requests == []
-    with pytest.raises(hc.CodexError) as err:
-        await hc.CodexClient(model="gpt-6.1-sol",
-                             native_home=mock_codex.native_home).preflight(timeout=60)
-    assert err.value.kind == "isolation"
+    await hc.CodexClient(model="gpt-6.1-sol",
+                         native_home=mock_codex.native_home).preflight(timeout=60)
+    assert mock_codex.requests == []
+
+
+@pytest.mark.asyncio
+async def test_real_cli_luna_preflight_never_starts_inference(mock_codex):
+    await hc.CodexClient(model='gpt-6-luna', native_home=mock_codex.native_home).preflight(timeout=60)
     assert mock_codex.requests == []

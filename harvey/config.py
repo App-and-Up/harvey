@@ -5,10 +5,11 @@ import os
 import re
 from datetime import time as _time
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from harvey.paths import PROJECT_ROOT
 
@@ -36,6 +37,7 @@ class PersonaConfig(BaseModel):
 class OfferConfig(BaseModel):
     primary: str = ""
     entry: str = ""
+    first_email_mode: Literal["discovery", "product_intro"] = "discovery"
     goal: str = "book_call"  # book_call, start_trial, get_reply
     booking_method: str = "calendar_link"  # calendar_link, suggest_times, ask_preference
     booking_url: str = ""
@@ -68,6 +70,14 @@ class ICPConfig(BaseModel):
     geo_coordinates: dict[str, str] = {}
 
 
+class OutreachPilotConfig(BaseModel):
+    enabled: bool = False
+    campaign_id: str = Field(default="initial-outreach", min_length=1)
+    daily_new_companies: int = Field(default=20, ge=1)
+    duration_days: int = Field(default=14, ge=1)
+    min_interval_minutes: int = Field(default=15, ge=0)
+
+
 class EmailChannelConfig(BaseModel):
     enabled: bool = True
     # "instantly" (legacy), "gmail" (Gmail/Workspace via API — recommended),
@@ -85,6 +95,13 @@ class EmailChannelConfig(BaseModel):
     # Kill switch: pause all sending when bounces exceed this fraction of
     # sent mail (measured over the trailing sends). 0 disables the switch.
     max_bounce_rate: float = 0.05
+    pilot: OutreachPilotConfig = Field(default_factory=OutreachPilotConfig)
+
+    @model_validator(mode="after")
+    def _pilot_requires_native_provider(self):
+        if self.pilot.enabled and self.provider not in ("gmail", "smtp"):
+            raise ValueError("The outreach pilot requires Gmail or SMTP sending")
+        return self
 
     @field_validator("max_daily_sends")
     @classmethod
@@ -205,6 +222,13 @@ class BrainConfig(BaseModel):
         return v
 
 
+class ComplianceConfig(BaseModel):
+    """Postal address and opt-out instructions for native sequence email."""
+
+    postal_address: str = ""
+    opt_out_line: str = 'Per non ricevere altre email, rispondi "no grazie".'
+
+
 class HarveyConfig(BaseModel):
     persona: PersonaConfig
     product: ProductConfig
@@ -212,6 +236,7 @@ class HarveyConfig(BaseModel):
     channels: ChannelsConfig = ChannelsConfig()
     usage: UsageConfig = UsageConfig()
     brain: BrainConfig = BrainConfig()
+    compliance: ComplianceConfig = ComplianceConfig()
 
 
 class EnvConfig(BaseModel):

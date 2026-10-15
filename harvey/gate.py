@@ -53,6 +53,8 @@ def pre_send_check(
     prospect=None,
     allow_risky: bool = False,
     kind: str = "sequence",
+    postal_address: str | None = None,
+    opt_out_line: str | None = None,
 ) -> GateResult:
     """Run every deterministic check. Returns ok=False with reasons on any hit."""
     reasons: list[str] = []
@@ -99,6 +101,18 @@ def pre_send_check(
     links = URL_RE.findall(body)
     if len(links) > MAX_LINKS:
         reasons.append(f"too many links ({len(links)} > {MAX_LINKS})")
+
+    if kind == "sequence":
+        if postal_address is not None:
+            if not postal_address.strip():
+                reasons.append("compliance.postal_address is not set in harvey.yaml")
+            elif postal_address.strip() not in body:
+                reasons.append("postal address footer missing")
+        if opt_out_line is not None:
+            if not opt_out_line.strip():
+                reasons.append("compliance.opt_out_line is not set in harvey.yaml")
+            elif opt_out_line.strip() not in body:
+                reasons.append("opt-out footer missing")
 
     # No HTML — Harvey sends plain text only
     if re.search(r"<\s*(html|body|div|table|img|a)\b", body, re.IGNORECASE):

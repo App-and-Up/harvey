@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import pytest_asyncio
 
+from harvey.config import ComplianceConfig
 from harvey.gate import pre_send_check
 from harvey.models.campaign import Campaign, EmailStep
 from harvey.models.prospect import Prospect
@@ -59,6 +60,7 @@ class FakeProvider(MailProvider):
 
 
 class Cfg:
+    compliance = ComplianceConfig(postal_address="123 Test Street, Test City")
     class persona:
         name = "Harvey"; email = "harvey@x.co"; company = "X"; role = "BD"; tone = "direct"
 

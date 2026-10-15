@@ -24,11 +24,11 @@ STRICT EMAIL RULES — FOLLOW EVERY SINGLE ONE:
 8. NEVER start an email with "I" or "We". Start with them.
 9. NEVER use exclamation marks.
 10. Email 1 MUST be under 75 words. Email 2 under 75 words. Email 3 under 40 words. Count them.
-11. Email 1 does NOT pitch the product. It makes an observation and asks a question.
+11. {{first_email_instructions}}
 12. Subject lines: lowercase, 2-5 words, no prospect name, no "quick question".
 13. Each email has exactly ONE question or CTA. Not two. Not zero. One.
 14. Write like a real person, not a marketer. Read it out loud. If it sounds like AI wrote it, rewrite it.
-15. Do NOT name the product in email 1. Save that for email 2 or the reply.
+15. The configured first-email instructions above take precedence over generic outreach frameworks in the skills. They do not override factual accuracy or the other strict rules.
 16. NEVER use "no pressure", "no obligation", "no contracts" in email 1.
 17. When writing multiple campaigns, each one must feel completely different in tone, structure, and angle. Not just different pain points in the same format.
 

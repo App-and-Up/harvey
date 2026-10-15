@@ -253,7 +253,7 @@ async def get_settings():
     all_keys = [
         "INSTANTLY_API_KEY", "LINKEDIN_EMAIL", "LINKEDIN_PASSWORD",
         "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN",
-        "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET",
+        "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "SERPER_API_KEY",
         "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD",
         "IMAP_HOST", "IMAP_PORT", "IMAP_USERNAME", "IMAP_PASSWORD",
         "REOON_API_KEY", "ZEROBOUNCE_API_KEY", "HUNTER_API_KEY",
@@ -280,6 +280,7 @@ async def get_settings():
         "gmail_client_id": env_vars.get("GMAIL_CLIENT_ID", ""),
         "gmail_client_secret_set": is_set("GMAIL_CLIENT_SECRET"),
         "gmail_authorized": gmail_token,
+        "serper_api_key_set": is_set("SERPER_API_KEY"),
         "smtp_host": env_vars.get("SMTP_HOST", ""),
         "smtp_port": env_vars.get("SMTP_PORT", ""),
         "smtp_username": env_vars.get("SMTP_USERNAME", ""),
@@ -305,7 +306,7 @@ async def save_env_settings(request: Request):
         updates = {}
         for key in ["INSTANTLY_API_KEY", "LINKEDIN_EMAIL", "LINKEDIN_PASSWORD",
                      "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN",
-                     "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET",
+                     "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "SERPER_API_KEY",
                      "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD",
                      "IMAP_HOST", "IMAP_PORT", "IMAP_USERNAME", "IMAP_PASSWORD",
                      "REOON_API_KEY", "ZEROBOUNCE_API_KEY", "HUNTER_API_KEY"]:

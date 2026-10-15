@@ -44,6 +44,21 @@ class Writer:
     def is_native(self) -> bool:
         return self.config.channels.email.provider in NATIVE_PROVIDERS
 
+    def _first_email_instructions(self) -> str:
+        offer = self.config.product.offer
+        if offer.first_email_mode == "product_intro":
+            return (
+                "Email 1: Use one verified observation about the prospect, then "
+                "briefly introduce ONE relevant product use case and ask one question. "
+                "You may name the product. Do not list features, assume a problem, "
+                "promise results or integrations, or propose replacing existing systems. "
+                f"Use the configured entry offer: {offer.entry}"
+            )
+        return (
+            "Email 1: Make one verified observation and ask one question. "
+            "No pitch, no product name."
+        )
+
     async def run(self):
         """Create email campaigns for prospects that need outreach."""
         logger.info("Writer: Crafting email campaigns...")
@@ -206,6 +221,7 @@ class Writer:
             persona_company=self.config.persona.company,
             persona_role=self.config.persona.role,
             persona_tone=self.config.persona.tone,
+            first_email_instructions=self._first_email_instructions(),
         ) or ""
         if self.skills:
             prompt += "\n\n" + self.skills
@@ -221,8 +237,7 @@ or anything else:
 {chr(10).join(facts)}
 
 Requirements:
-- Under 75 words. One specific observation from the FACTS above, one
-  question. No pitch, no product name.
+- Under 75 words. {self._first_email_instructions()}
 - Write the actual text (no merge variables — you know their name/company).
 - Subject: lowercase, 2-5 words.
 - Follow every STRICT EMAIL RULE above.
@@ -260,6 +275,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             persona_company=self.config.persona.company,
             persona_role=self.config.persona.role,
             persona_tone=self.config.persona.tone,
+            first_email_instructions=self._first_email_instructions(),
         )
 
         if not prompt:
@@ -281,7 +297,7 @@ Write a 3-email cold outreach sequence for prospects like these:
 {prospect_summary}
 
 Requirements:
-- Email 1: Personalized cold observation + one question. Under 75 words. No pitch.
+- {self._first_email_instructions()} Under 75 words.
 - Email 2: Follow-up 3 days later. Different angle, one concrete proof point. Under 75 words.
 - Email 3: Break-up email 4 days after that. Under 40 words. Gracious, not guilt-tripping.
 - Use {{{{first_name}}}}, {{{{company}}}}, {{{{title}}}} as merge variables — every email

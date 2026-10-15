@@ -64,3 +64,9 @@ usage:
     start: "22:00"
     end: "07:00"
     timezone: "America/New_York"
+
+# Footer delle email iniziali. Senza indirizzo postale, gli invii restano
+# in attesa; le risposte alle conversazioni continuano normalmente.
+compliance:
+  postal_address: ""  # Inserisci il tuo indirizzo postale reale.
+  opt_out_line: 'Per non ricevere altre email, rispondi "no grazie".'

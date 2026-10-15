@@ -17,7 +17,7 @@ function applyTheme(mode) {
   if (mode === 'auto') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', mode);
   const btn = document.getElementById('theme-btn');
-  if (btn) btn.textContent = mode;
+  if (btn) btn.textContent = {auto: 'sistema', light: 'chiaro', dark: 'scuro'}[mode];
 }
 
 function cycleTheme() {
@@ -53,50 +53,65 @@ function escHtml(s) {
 // tone: waiting (needs a human) | active (in flight) | good | bad | idle
 const STATUS = {
   // prospects
-  new:            ['New', 'active'],
-  contacted:      ['Contacted', 'active'],
-  replied:        ['Replied', 'good'],
-  interested:     ['Interested', 'good'],
-  meeting:        ['Meeting booked', 'note'],
-  not_interested: ['Not interested', 'bad'],
-  bounced:        ['Bounced', 'bad'],
+  new:            ['Nuovo', 'active'],
+  contacted:      ['Contattato', 'active'],
+  replied:        ['Ha risposto', 'good'],
+  interested:     ['Interessato', 'good'],
+  meeting:        ['Appuntamento fissato', 'note'],
+  meeting_booked: ['Appuntamento fissato', 'note'],
+  not_interested: ['Non interessato', 'bad'],
+  bounced:        ['Non recapitata', 'bad'],
+  queued: ['In coda', 'active'],
+  opted_out: ['Non ricontattare', 'idle'],
+  lost: ['Perso', 'bad'],
   // campaigns
-  draft:          ['Draft', 'waiting'],
-  active:         ['Active', 'good'],
-  completed:      ['Completed', 'idle'],
-  paused:         ['Paused', 'bad'],
+  draft:          ['Bozza', 'waiting'],
+  active:         ['Attiva', 'good'],
+  completed:      ['Completata', 'idle'],
+  paused:         ['In pausa', 'bad'],
   // conversations
-  open:           ['Open', 'active'],
-  closed:         ['Closed', 'idle'],
-  closed_won:     ['Won', 'good'],
-  closed_lost:    ['Lost', 'bad'],
-  objection:      ['Objection', 'waiting'],
+  open:           ['Aperta', 'active'],
+  closed:         ['Chiusa', 'idle'],
+  closed_won:     ['Acquisito', 'good'],
+  closed_lost:    ['Perso', 'bad'],
+  objection:      ['Obiezione', 'waiting'],
+  initial_outreach: ['Primo contatto', 'active'],
+  engaged: ['Conversazione avviata', 'active'],
+  qualifying: ['Qualifica', 'active'],
+  presenting: ['Presentazione', 'active'],
+  negotiating: ['Trattativa', 'active'],
+  closing: ['Conclusione', 'active'],
+  question: ['Domanda', 'waiting'],
+  wrong_person: ['Referente errato', 'waiting'],
+  ooo: ['Fuori ufficio', 'idle'],
+  unsubscribe: ['Richiesta di cancellazione', 'bad'],
+  escalate: ['Intervento umano richiesto', 'waiting'],
   // outbox
-  pending_review: ['Waiting on you', 'waiting'],
-  approved:       ['Approved', 'good'],
-  scheduled:      ['Scheduled', 'active'],
-  sent:           ['Sent', 'good'],
-  failed:         ['Failed', 'bad'],
-  rejected:       ['Rejected', 'idle'],
-  cancelled:      ['Cancelled', 'idle'],
+  pending_review: ['In attesa di conferma', 'waiting'],
+  approved:       ['Approvata', 'good'],
+  scheduled:      ['Programmata', 'active'],
+  sent:           ['Inviata', 'good'],
+  failed:         ['Non riuscita', 'bad'],
+  rejected:       ['Rifiutata', 'idle'],
+  cancelled:      ['Annullata', 'idle'],
   // signals
-  proposed:       ['Waiting on you', 'waiting'],
-  confirmed:      ['Confirmed', 'good'],
+  proposed:       ['In attesa di conferma', 'waiting'],
+  confirmed:      ['Confermato', 'good'],
   // email deliverability
-  verified:       ['Verified', 'good'],
-  risky:          ['Catch-all', 'waiting'],
-  guess:          ['Unverified', 'idle'],
-  invalid:        ['Invalid', 'bad'],
+  verified:       ['Verificato', 'good'],
+  risky:          ['Accetta ogni indirizzo', 'waiting'],
+  guess:          ['Non verificato', 'idle'],
+  invalid:        ['Non valido', 'bad'],
   // runs
-  running:        ['Running', 'active'],
-  stale:          ['Stale', 'bad'],
+  running:        ['In esecuzione', 'active'],
+  stale:          ['Da aggiornare', 'bad'],
 };
 
 function statusMeta(status) {
   const key = String(status || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
   const hit = STATUS[key];
   if (hit) return { label: hit[0], tone: hit[1] };
-  const label = String(status || 'unknown').replace(/_/g, ' ');
+  const label = String(status || 'sconosciuto').replace(/_/g, ' ');
   return { label: label.charAt(0).toUpperCase() + label.slice(1), tone: 'idle' };
 }
 
@@ -110,7 +125,7 @@ function formatDate(d) {
   try {
     const dt = new Date(d);
     if (isNaN(dt)) return escHtml(d);
-    return dt.toLocaleString('en-US', {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    return dt.toLocaleString('it-IT', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
   } catch { return escHtml(d); }
 }
 
@@ -121,15 +136,15 @@ function emptyState(glyph, title, copy) {
 }
 
 function offlineState() {
-  return emptyState('&#9888;', 'Dashboard can\'t reach the server',
-    'The dashboard process may have stopped. Restart it with <b>harvey dashboard</b> and refresh this page.');
+  return emptyState('&#9888;', 'Il pannello non riesce a raggiungere il server',
+    'Il processo del pannello potrebbe essersi arrestato. Riavvialo con <b>harvey dashboard</b> e aggiorna la pagina.');
 }
 
 async function api(path, opts) {
   try {
     const r = await fetch(path, opts);
     if (!r.ok) return null;
-    return await r.json();
+    return italianPayload(path, await r.json());
   } catch {
     return null;
   }
@@ -138,7 +153,7 @@ async function api(path, opts) {
 function showToast(msg, type) {
   const t = document.createElement('div');
   t.className = 'toast ' + type;
-  t.textContent = msg;
+  t.textContent = uiText(msg);
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 2600);
 }
@@ -192,9 +207,9 @@ async function loadToday() {
   if (!items.length) {
     el.innerHTML = '<div class="queue-clear">' +
       '<div class="glyph">&#10003;</div><div>' +
-      '<div class="qtitle">Nothing needs you</div>' +
-      '<div class="qdetail">Harvey has everything it needs. Anything that requires a ' +
-      'decision — an email to approve, a signal to confirm — shows up here.</div>' +
+      '<div class="qtitle">Nessuna decisione in attesa</div>' +
+      '<div class="qdetail">Harvey ha tutto il necessario. Ogni richiesta di ' +
+      'intervento — un’email da approvare o un segnale da confermare — appare qui.</div>' +
       '</div></div>';
     return;
   }
@@ -219,13 +234,13 @@ function renderFigures(stats) {
     '<span class="v' + (value ? '' : ' zero') + '">' + value + '</span></div>';
 
   el.innerHTML = '<div class="figures">' +
-    row('Companies', stats.companies || 0) +
-    row('Contacts', stats.prospects || 0) +
-    row('Signals on', stats.signals_confirmed || 0) +
-    row('Not yet read', stats.unprofiled || 0) +
-    row('Awaiting approval', stats.outbox_pending || 0) +
-    row('Scheduled', stats.outbox_approved || 0) +
-    row('Live conversations', stats.open_conversations || 0) +
+    row('Aziende', stats.companies || 0) +
+    row('Contatti', stats.prospects || 0) +
+    row('Segnali attivi', stats.signals_confirmed || 0) +
+    row('Da analizzare', stats.unprofiled || 0) +
+    row('Da approvare', stats.outbox_pending || 0) +
+    row('Programmate', stats.outbox_approved || 0) +
+    row('Conversazioni aperte', stats.open_conversations || 0) +
   '</div>';
 }
 
@@ -235,14 +250,14 @@ async function loadTodayActivity() {
   const data = await api('/api/activity');
   if (!Array.isArray(data) || !data.length) {
     el.innerHTML = '<p class="muted" style="font-size:12.5px">' +
-      'Nothing yet. Every action Harvey takes shows up here.</p>';
+      'Nessuna attività per ora. Le azioni di Harvey appariranno qui.</p>';
     return;
   }
   el.innerHTML = '<div class="activity-feed">' + data.slice(0, 12).map(a =>
     '<div class="activity-item">' +
       '<span class="time">' + formatDate(a.created_at) + '</span>' +
-      '<span class="agent">' + escHtml(a.agent) + '</span>' +
-      '<span class="action">' + escHtml(String(a.action_type).replace(/_/g, ' ')) + '</span>' +
+      '<span class="agent">' + escHtml(uiTerm(a.agent)) + '</span>' +
+      '<span class="action">' + escHtml(uiTerm(a.action_type)) + '</span>' +
     '</div>').join('') + '</div>';
 }
 
@@ -275,13 +290,13 @@ async function loadRuns() {
   // A rail is 300px wide — a seven-column table does not belong here.
   el.innerHTML = '<div class="figures">' + runs.slice(0, 6).map(r =>
     '<div class="figure" style="align-items:flex-start">' +
-      '<span class="k">' + escHtml(r.stage) +
+      '<span class="k">' + escHtml(uiTerm(r.stage)) +
         '<br><span class="muted" style="font-size:11px">' +
         formatDate(r.started_at) + '</span></span>' +
       '<span style="text-align:right;flex:none">' + badge(r.status) +
         '<br><span class="muted" style="font-family:var(--mono);font-size:11px">' +
-        (r.records || 0) + ' rec &middot; ' +
-        (r.cost_usd ? '$' + Number(r.cost_usd).toFixed(4) : 'free') + '</span></span>' +
+        (r.records || 0) + ' record &middot; ' +
+        (r.cost_usd ? '$' + Number(r.cost_usd).toLocaleString('it-IT', {minimumFractionDigits:4, maximumFractionDigits:4}) : 'gratuito') + '</span></span>' +
     '</div>').join('') + '</div>';
 }
 
@@ -303,7 +318,7 @@ async function loadSetupStatus() {
               : '<span class="check-icon pending"></span>') +
       '<div class="check-info">' +
         '<div class="check-label ' + (c.done ? 'done' : '') + '">' + escHtml(c.label) +
-          (optional ? '<span class="optional-tag">optional</span>' : '') + '</div>' +
+          (optional ? '<span class="optional-tag">facoltativo</span>' : '') + '</div>' +
         (!c.done ? '<div class="check-help">' + escHtml(c.help) + '</div>' : '') +
       '</div></div>';
 
@@ -312,13 +327,13 @@ async function loadSetupStatus() {
 
   el.innerHTML =
     '<div class="rail-block">' +
-      '<div class="subhead">Setup &mdash; ' + pct + '%</div>' +
+      '<div class="subhead">Configurazione &mdash; ' + pct + '%</div>' +
       '<div class="progress-bar" style="margin-bottom:14px">' +
         '<div class="progress-fill yellow" style="width:' + pct + '%"></div></div>' +
       required.map(c => renderCheck(c, false)).join('') +
       (optional.length
         ? '<details style="margin-top:10px"><summary class="muted" ' +
-          'style="font-size:12px">' + optional.length + ' optional</summary>' +
+          'style="font-size:12px">' + optional.length + ' facoltativi</summary>' +
           '<div style="margin-top:6px">' +
           optional.map(c => renderCheck(c, true)).join('') + '</div></details>'
         : '') +
@@ -339,7 +354,7 @@ async function loadSignals() {
   sumEl.innerHTML = '<div class="sig-summary">' +
     ['confirmed', 'proposed', 'rejected'].map(k =>
       '<div class="sig-stat ' + k + '"><div class="n">' + (s[k] || 0) + '</div>' +
-      '<div class="k">' + (k === 'proposed' ? 'awaiting you' : k) + '</div></div>'
+      '<div class="k">' + (k === 'proposed' ? 'da confermare' : (k === 'confirmed' ? 'confermati' : 'esclusi')) + '</div></div>'
     ).join('') +
     '</div>';
 
@@ -353,9 +368,9 @@ async function loadSignals() {
       (undecided
         ? '<div style="display:flex;gap:6px;flex-shrink:0">' +
             '<button class="btn btn-primary btn-sm" onclick=\'setSignals(' +
-              JSON.stringify(codes) + ", \"confirmed\")'>Confirm all " + undecided + '</button>' +
+              JSON.stringify(codes) + ", \"confirmed\")'>Conferma tutti: " + undecided + '</button>' +
             '<button class="btn btn-secondary btn-sm" onclick=\'setSignals(' +
-              JSON.stringify(codes) + ", \"rejected\")'>Skip all</button>" +
+              JSON.stringify(codes) + ", \"rejected\")'>Escludi tutti</button>" +
           '</div>'
         : '') +
       '</div>' +
@@ -367,25 +382,25 @@ async function loadSignals() {
 }
 
 function sigRow(sig) {
-  const free = /free|included/i.test(sig.cost_note || '');
-  const costCls = free ? 'free' : (/\$/.test(sig.cost_note || '') ? 'paid' : '');
+  const free = /free|included|gratuito|incluso/i.test(sig.cost_note || '');
+  const costCls = free ? 'free' : (/\$|USD/.test(sig.cost_note || '') ? 'paid' : '');
   const seen = sig.companies
-    ? '<span class="cost-chip">seen on ' + sig.companies +
-      (sig.companies === 1 ? ' company' : ' companies') + ' so far</span>' : '';
+    ? '<span class="cost-chip">rilevato in ' + sig.companies +
+      (sig.companies === 1 ? ' azienda' : ' aziende') + ' finora</span>' : '';
   const floor = sig.confidence_floor > 0
-    ? '<span class="cost-chip">only recorded above ' +
-      Math.round(sig.confidence_floor * 100) + '% confidence</span>' : '';
+    ? '<span class="cost-chip">registrato solo con attendibilità superiore al ' +
+      Math.round(sig.confidence_floor * 100) + '%</span>' : '';
 
   const decide = sig.status === 'confirmed'
     ? '<button class="btn btn-secondary btn-sm" onclick="setSignals([\'' + sig.code +
-        '\'],\'rejected\')">Turn off</button>'
+        '\'],\'rejected\')">Disattiva</button>'
     : sig.status === 'rejected'
       ? '<button class="btn btn-secondary btn-sm" onclick="setSignals([\'' + sig.code +
-          '\'],\'confirmed\')">Turn on</button>'
+          '\'],\'confirmed\')">Attiva</button>'
       : '<button class="btn btn-primary btn-sm" onclick="setSignals([\'' + sig.code +
-          '\'],\'confirmed\')">Confirm</button>' +
+          '\'],\'confirmed\')">Conferma</button>' +
         '<button class="btn btn-secondary btn-sm" onclick="setSignals([\'' + sig.code +
-          '\'],\'rejected\')">Skip</button>';
+          '\'],\'rejected\')">Escludi</button>';
 
   return '<div class="sig-row ' + (sig.status === 'rejected' ? 'rejected' : '') + '">' +
     '<div class="sig-main">' +
@@ -393,7 +408,7 @@ function sigRow(sig) {
         '<span class="sig-code">' + escHtml(sig.code) + '</span></div>' +
       '<div class="sig-desc">' + escHtml(sig.description) + '</div>' +
       '<div class="sig-meta">' +
-        '<span class="cost-chip ' + costCls + '">' + escHtml(sig.cost_note || 'cost unknown') + '</span>' +
+        '<span class="cost-chip ' + costCls + '">' + escHtml(sig.cost_note || 'costo sconosciuto') + '</span>' +
         floor + seen + badge(sig.status) +
       '</div>' +
     '</div>' +
@@ -410,12 +425,11 @@ async function setSignals(codes, status) {
   if (data && data.success) {
     showToast(
       status === 'confirmed'
-        ? 'Confirmed ' + data.changed + ' signal' + (data.changed === 1 ? '' : 's') +
-          ' — Harvey will collect ' + (data.changed === 1 ? 'it' : 'them') + ' from now on.'
-        : data.changed + ' signal' + (data.changed === 1 ? '' : 's') + ' turned off.',
+        ? data.changed + (data.changed === 1 ? ' segnale confermato.' : ' segnali confermati.') + ' Harvey li raccoglierà dai prossimi cicli.'
+        : data.changed + (data.changed === 1 ? ' segnale disattivato.' : ' segnali disattivati.'),
       'success');
   } else {
-    showToast('Could not update that signal.', 'error');
+    showToast('Impossibile aggiornare il segnale.', 'error');
   }
   loadSignals();
 }
@@ -433,20 +447,20 @@ async function loadDiscoverProviders() {
   _provider = _provider || data.selected || data.default;
   el.innerHTML = '<div class="prov-grid">' + data.providers.map(p => {
     const ready = p.configured
-      ? '<span class="badge t-good">ready</span>'
-      : '<span class="badge t-waiting">needs a key</span>';
+      ? '<span class="badge t-good">pronto</span>'
+      : '<span class="badge t-waiting">richiede credenziali</span>';
     return '<div class="prov-card ' + (p.key === _provider ? 'selected' : '') +
       '" onclick="pickProvider(\'' + p.key + '\')">' +
       '<div class="prov-head"><h3>' + escHtml(p.label) + '</h3>' + ready + '</div>' +
       '<div class="blurb">' + escHtml(p.blurb) + '</div>' +
-      '<div class="row"><span class="k">Cost</span><span class="v">' +
+      '<div class="row"><span class="k">Costo</span><span class="v">' +
         escHtml(p.cost_note) + '</span></div>' +
-      '<div class="row"><span class="k">Free</span><span class="v">' +
+      '<div class="row"><span class="k">Quota gratuita</span><span class="v">' +
         escHtml(p.free_tier) + '</span></div>' +
       (p.needs_key
-        ? '<div class="row"><span class="k">Setup</span><span class="v">' +
+        ? '<div class="row"><span class="k">Configurazione</span><span class="v">' +
           escHtml(p.env_keys.join(', ')) + ' in .env &middot; ' +
-          '<a href="' + escHtml(p.signup_url) + '" target="_blank" rel="noopener">get a key</a>' +
+          '<a href="' + escHtml(p.signup_url) + '" target="_blank" rel="noopener">ottieni una chiave</a>' +
           '</span></div>'
         : '') +
       (p.caveat ? '<div class="caveat">' + escHtml(p.caveat) + '</div>' : '') +
@@ -460,11 +474,11 @@ async function loadDiscoverProviders() {
   } else if (!running && _discoverPoll) {
     clearInterval(_discoverPoll);
     _discoverPoll = null;
-    // A finished run leaves the button stuck on "Running…" otherwise.
+    // A finished run leaves the button stuck on "Operazione in corso…" otherwise.
     const btn = document.getElementById('disc-run');
     btn.disabled = true;
-    btn.textContent = 'Estimate first';
-    showToast('Discovery finished.', 'success');
+    btn.textContent = 'Prima calcola la stima';
+    showToast('Ricerca completata.', 'success');
   }
   renderDiscoverResult(data.last_report, running);
 }
@@ -472,7 +486,7 @@ async function loadDiscoverProviders() {
 function pickProvider(key) {
   _provider = key;
   document.getElementById('disc-run').disabled = true;
-  document.getElementById('disc-run').textContent = 'Estimate first';
+  document.getElementById('disc-run').textContent = 'Prima calcola la stima';
   document.getElementById('discover-estimate').innerHTML = '';
   loadDiscoverProviders();
 }
@@ -491,14 +505,14 @@ function discoverBody() {
 
 async function estimateDiscovery() {
   const el = document.getElementById('discover-estimate');
-  el.innerHTML = '<p class="muted" style="font-size:13px">Pricing it…</p>';
+  el.innerHTML = '<p class="muted" style="font-size:13px">Calcolo della stima…</p>';
   const data = await api('/api/discover/estimate', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(discoverBody()),
   });
   if (!data || data.error) {
     el.innerHTML = '<div class="test-result error">' +
-      escHtml((data && data.error) || 'Could not estimate.') + '</div>';
+      escHtml((data && data.error) || 'Impossibile calcolare la stima.') + '</div>';
     return;
   }
 
@@ -506,35 +520,35 @@ async function estimateDiscovery() {
   const over = data.estimated_cost > cap;
   el.innerHTML = '<div class="estimate-box">' +
     '<div class="amount ' + (data.free ? 'free' : 'paid') + '">' +
-      (data.free ? 'Free' : '$' + data.estimated_cost.toFixed(4)) + '</div>' +
+      (data.free ? 'Gratuito' : '$' + data.estimated_cost.toLocaleString('it-IT', {minimumFractionDigits:4, maximumFractionDigits:4})) + '</div>' +
     '<div class="muted" style="font-size:13px;margin-top:2px">' +
-      data.query_count + ' quer' + (data.query_count === 1 ? 'y' : 'ies') +
-      (data.free ? '' : ' &middot; cap is $' + cap.toFixed(2)) + '</div>' +
+      data.query_count + (data.query_count === 1 ? ' ricerca' : ' ricerche') +
+      (data.free ? '' : ' &middot; limite USD ' + cap.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2})) + '</div>' +
     (over ? '<div class="test-result error" style="margin-top:12px">' +
-      'Over your cap. Raise the cap or narrow the search.</div>' : '') +
+      'La stima supera il limite. Aumenta il limite oppure restringi la ricerca.</div>' : '') +
     '<div class="query-list">' +
       data.queries.slice(0, 40).map(escHtml).join('<br>') +
-      (data.queries.length > 40 ? '<br>… and ' + (data.queries.length - 40) + ' more' : '') +
+      (data.queries.length > 40 ? '<br>… e ' + (data.queries.length - 40) + ' altre' : '') +
     '</div></div>';
 
   const btn = document.getElementById('disc-run');
   btn.disabled = over;
-  btn.textContent = over ? 'Over cap'
-    : (data.free ? 'Run — free' : 'Run — spend up to $' + data.estimated_cost.toFixed(2));
+  btn.textContent = over ? 'Oltre il limite'
+    : (data.free ? 'Avvia gratuitamente' : 'Avvia — spesa massima USD ' + data.estimated_cost.toLocaleString('it-IT', {minimumFractionDigits:2, maximumFractionDigits:2}));
 }
 
 async function runDiscovery() {
   const btn = document.getElementById('disc-run');
   btn.disabled = true;
-  btn.textContent = 'Running…';
+  btn.textContent = 'Operazione in corso…';
   const data = await api('/api/discover/run', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(discoverBody()),
   });
   if (data && data.success) {
-    showToast('Discovery started — ' + data.queries + ' queries.', 'success');
+    showToast('Ricerca avviata — ' + data.queries + ' ricerche.', 'success');
   } else {
-    showToast((data && data.message) || 'Could not start.', 'error');
+    showToast((data && data.message) || 'Impossibile avviare.', 'error');
     btn.disabled = false;
   }
   loadDiscoverProviders();
@@ -542,17 +556,17 @@ async function runDiscovery() {
 
 async function stopDiscovery() {
   const data = await api('/api/discover/stop', {method: 'POST'});
-  showToast(data && data.success ? 'Stopping after the current query.'
-                                 : 'Could not stop.', data ? 'success' : 'error');
+  showToast(data && data.success ? 'L’operazione si interromperà dopo la ricerca attuale.'
+                                 : 'Impossibile interrompere.', data ? 'success' : 'error');
   loadDiscoverProviders();
 }
 
 function renderDiscoverResult(report, running) {
   const el = document.getElementById('discover-result');
   if (running) {
-    el.innerHTML = '<div class="card"><h2>Running…</h2>' +
-      '<p class="muted" style="font-size:13px">Harvey is working through the ' +
-      'queries. Results land in Companies, and the run log is on Today.</p></div>';
+    el.innerHTML = '<div class="card"><h2>Operazione in corso…</h2>' +
+      '<p class="muted" style="font-size:13px">Harvey sta eseguendo le ' +
+      'ricerche. I risultati sono nella sezione Aziende e il registro nella sezione Oggi.</p></div>';
     return;
   }
   if (!report) { el.innerHTML = ''; return; }
@@ -562,20 +576,20 @@ function renderDiscoverResult(report, running) {
     '<div class="value"' + (tone ? ' style="color:var(--' + tone + ')"' : '') + '>' +
     value + '</div></div>';
 
-  el.innerHTML = '<div class="subhead">Last run</div>' +
+  el.innerHTML = '<div class="subhead">Ultima esecuzione</div>' +
     '<div class="stats-grid">' +
-      stat('New companies', report.new_companies || 0, 'accent') +
-      stat('Already known', report.known_companies || 0) +
-      stat('Observations', report.observations || 0) +
-      stat('Filtered as junk', report.junk || 0) +
-      stat('Actual cost', report.actual_cost ? '$' + report.actual_cost.toFixed(4) : 'free') +
+      stat('Nuove aziende', report.new_companies || 0, 'accent') +
+      stat('Già conosciute', report.known_companies || 0) +
+      stat('Osservazioni', report.observations || 0) +
+      stat('Risultati non pertinenti', report.junk || 0) +
+      stat('Costo effettivo', report.actual_cost ? '$' + report.actual_cost.toLocaleString('it-IT', {minimumFractionDigits:4, maximumFractionDigits:4}) : 'gratuito') +
     '</div>' +
     (report.stopped ? '<div class="test-result error" style="margin-top:14px">' +
-      'Stopped early: ' + escHtml(report.stopped) + '</div>' : '') +
+      'Interruzione anticipata: ' + escHtml(uiText(report.stopped)) + '</div>' : '') +
     ((report.errors || []).length
-      ? '<div class="card" style="margin-top:14px"><h2>Problems</h2>' +
+      ? '<div class="card" style="margin-top:14px"><h2>Problemi</h2>' +
         (report.errors || []).slice(0, 8).map(e =>
-          '<div class="check-help">' + escHtml(e) + '</div>').join('') + '</div>'
+          '<div class="check-help">' + escHtml(uiText(e)) + '</div>').join('') + '</div>'
       : '');
 }
 
@@ -593,7 +607,7 @@ function renderCohortBuilder() {
 
   if (!confirmed.length) {
     el.innerHTML = '<p class="muted" style="font-size:13px">' +
-      'Confirm some signals above and they become the building blocks here.</p>';
+      'Conferma alcuni segnali qui sopra per usarli come criteri del gruppo.</p>';
     document.getElementById('cohort-result').innerHTML = '';
     return;
   }
@@ -610,9 +624,9 @@ function renderCohortBuilder() {
         '<span class="n">' + (s.companies || 0) + '</span></label>'
     ).join('') + '</div></div>';
 
-  el.innerHTML = col('Must have', 'require', '&mdash; every company in the cohort carries all of these') +
+  el.innerHTML = col('Requisiti necessari', 'require', '&mdash; ogni azienda del gruppo deve soddisfarli tutti') +
     '<div style="height:18px"></div>' +
-    col('Must not have', 'exclude', '&mdash; disqualifiers');
+    col('Criteri di esclusione', 'exclude', '&mdash; escludono l’azienda');
 }
 
 function toggleCohort(key, code, on) {
@@ -639,12 +653,12 @@ async function runCohort() {
 
   let html = '<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">' +
     '<div class="cohort-size">' + data.size + '</div>' +
-    '<div class="muted" style="font-size:13px;margin-top:2px">compan' +
-      (data.size === 1 ? 'y matches' : 'ies match') + ' this cohort right now</div>';
+    '<div class="muted" style="font-size:13px;margin-top:2px">' +
+      (data.size === 1 ? 'azienda corrisponde' : 'aziende corrispondono') + ' a questo gruppo</div>';
 
   if (data.companies && data.companies.length) {
     html += '<div class="table-card" style="margin-top:16px"><table><thead><tr>' +
-      '<th>Company</th><th>Domain</th><th>Industry</th><th>Location</th>' +
+      '<th>Azienda</th><th>Dominio</th><th>Settore</th><th>Località</th>' +
       '</tr></thead><tbody>' +
       data.companies.slice(0, 50).map(c =>
         '<tr><td>' + escHtml(c.name) + '</td><td class="muted">' + escHtml(c.domain) + '</td>' +
@@ -652,12 +666,12 @@ async function runCohort() {
         '<td class="muted">' + escHtml(c.location) + '</td></tr>'
       ).join('') + '</tbody></table></div>';
     if (data.size > 50) {
-      html += '<p class="muted" style="font-size:12px;margin-top:10px">Showing the first 50.</p>';
+      html += '<p class="muted" style="font-size:12px;margin-top:10px">Sono mostrate le prime 50 aziende.</p>';
     }
   } else if (data.size === 0) {
     html += '<p class="muted" style="font-size:13px;margin-top:12px">' +
-      'No company carries all of those yet. Either loosen the cohort, or run ' +
-      'prospecting to collect more.</p>';
+      'Nessuna azienda soddisfa ancora tutti i criteri. Riduci i requisiti oppure avvia ' +
+      'una nuova ricerca per raccogliere altri dati.</p>';
   }
   el.innerHTML = html + '</div>';
 }
@@ -678,13 +692,13 @@ async function loadSettings() {
     const el = document.getElementById(id);
     if (!el) return;
     el.value = '';
-    el.placeholder = isSet ? 'Saved — enter new value to change' : base;
+    el.placeholder = isSet ? 'Salvato — inserisci un nuovo valore per modificarlo' : base;
   };
   const tag = (id, ok, okLabel) => {
     const el = document.getElementById(id);
     if (!el) return;
     el.className = 'email-tag ' + (ok ? 'verified' : 'guess');
-    el.textContent = ok ? okLabel : 'not set';
+    el.textContent = ok ? okLabel : 'non configurato';
   };
 
   // Non-secret values repopulate
@@ -695,32 +709,40 @@ async function loadSettings() {
   document.getElementById('linkedin-email').value = data.linkedin_email || '';
   document.getElementById('cf-account-id').value = data.cloudflare_account_id || '';
 
-  savedPh('gmail-secret', data.gmail_client_secret_set, 'Enter client secret');
-  savedPh('smtp-pass', data.smtp_password_set, 'Enter password / app password');
-  savedPh('instantly-key', data.instantly_api_key_set, 'Enter your Instantly API key');
-  savedPh('reoon-key', data.reoon_api_key_set, '600 free/mo — reoon.com/email-verifier');
-  savedPh('zerobounce-key', data.zerobounce_api_key_set, '100 free/mo — best for M365/Workspace catch-alls');
-  savedPh('hunter-key', data.hunter_api_key_set, '50 free/mo + email-pattern lookup');
-  savedPh('linkedin-password', data.linkedin_password_set, 'Enter password');
-  savedPh('cf-api-token', data.cloudflare_api_token_set, 'Your Cloudflare API Token');
+  savedPh('gmail-secret', data.gmail_client_secret_set, 'Inserisci il segreto client');
+  savedPh('serper-key', data.serper_api_key_set, 'Inserisci la chiave API Serper');
+  savedPh('smtp-pass', data.smtp_password_set, 'Inserisci la password o la password per app');
+  savedPh('instantly-key', data.instantly_api_key_set, 'Inserisci la chiave API Instantly');
+  savedPh('reoon-key', data.reoon_api_key_set, '600 verifiche gratuite/mese — reoon.com/email-verifier');
+  savedPh('zerobounce-key', data.zerobounce_api_key_set, '100 gratuite/mese — per domini M365/Workspace che accettano ogni indirizzo');
+  savedPh('hunter-key', data.hunter_api_key_set, '50 gratuite/mese + ricerca del formato email');
+  savedPh('linkedin-password', data.linkedin_password_set, 'Inserisci la password');
+  savedPh('cf-api-token', data.cloudflare_api_token_set, 'Il tuo token API Cloudflare');
 
   // Gmail auth status chip
   const g = document.getElementById('gmail-status');
   if (g) {
-    if (data.gmail_authorized) { g.className = 'email-tag verified'; g.textContent = 'authorized'; }
-    else if (data.gmail_client_secret_set) { g.className = 'email-tag risky'; g.textContent = 'run: harvey gmail auth'; }
-    else { g.className = 'email-tag guess'; g.textContent = 'not set up'; }
+    if (data.gmail_authorized) { g.className = 'email-tag verified'; g.textContent = 'autorizzato'; }
+    else if (data.gmail_client_secret_set) { g.className = 'email-tag risky'; g.textContent = 'esegui: harvey gmail auth'; }
+    else { g.className = 'email-tag guess'; g.textContent = 'da configurare'; }
   }
-  tag('reoon-status', data.reoon_api_key_set, 'set');
-  tag('zerobounce-status', data.zerobounce_api_key_set, 'set');
-  tag('hunter-status', data.hunter_api_key_set, 'set');
+  tag('reoon-status', data.reoon_api_key_set, 'configurato');
+  tag('serper-status', data.serper_api_key_set, 'configurato');
+  tag('zerobounce-status', data.zerobounce_api_key_set, 'configurato');
+  tag('hunter-status', data.hunter_api_key_set, 'configurato');
 }
 
 function saveGmail() {
   const payload = {GMAIL_CLIENT_ID: document.getElementById('gmail-id').value.trim()};
   const sec = document.getElementById('gmail-secret').value;
   if (sec) payload.GMAIL_CLIENT_SECRET = sec;
-  saveEnv(payload, 'Gmail OAuth saved. Now run "harvey gmail auth" in your terminal.').then(loadSettings);
+  saveEnv(payload, 'Credenziali OAuth Gmail salvate. Esegui “harvey gmail auth” nel terminale.').then(loadSettings);
+}
+
+function saveSerper() {
+  const key = document.getElementById('serper-key').value.trim();
+  if (!key) return;
+  saveEnv({SERPER_API_KEY: key}, 'Chiave di ricerca salvata.').then(loadSettings);
 }
 
 function saveSmtp() {
@@ -731,7 +753,7 @@ function saveSmtp() {
   };
   const pass = document.getElementById('smtp-pass').value;
   if (pass) payload.SMTP_PASSWORD = pass;
-  saveEnv(payload, 'SMTP settings saved.').then(loadSettings);
+  saveEnv(payload, 'Impostazioni SMTP salvate.').then(loadSettings);
 }
 
 function saveVerifiers() {
@@ -742,8 +764,8 @@ function saveVerifiers() {
   if (r) payload.REOON_API_KEY = r;
   if (z) payload.ZEROBOUNCE_API_KEY = z;
   if (h) payload.HUNTER_API_KEY = h;
-  if (!Object.keys(payload).length) { showToast('Enter at least one key first.', 'error'); return; }
-  saveEnv(payload, 'Verification keys saved.').then(loadSettings);
+  if (!Object.keys(payload).length) { showToast('Inserisci almeno una chiave.', 'error'); return; }
+  saveEnv(payload, 'Chiavi di verifica salvate.').then(loadSettings);
 }
 
 async function saveEnv(payload, okMsg) {
@@ -752,37 +774,37 @@ async function saveEnv(payload, okMsg) {
     body: JSON.stringify(payload)
   });
   if (data && data.success) showToast(okMsg, 'success');
-  else showToast((data && data.message) || 'Save failed — is the dashboard still running?', 'error');
+  else showToast((data && data.message) || 'Salvataggio non riuscito. Il pannello è ancora in esecuzione?', 'error');
 }
 
 function saveInstantly() {
-  saveEnv({INSTANTLY_API_KEY: document.getElementById('instantly-key').value.trim()}, 'Instantly API key saved.');
+  saveEnv({INSTANTLY_API_KEY: document.getElementById('instantly-key').value.trim()}, 'Chiave API Instantly salvata.');
 }
 
 function saveLinkedIn() {
   const payload = {LINKEDIN_EMAIL: document.getElementById('linkedin-email').value.trim()};
   const pass = document.getElementById('linkedin-password').value;
   if (pass) payload.LINKEDIN_PASSWORD = pass;
-  saveEnv(payload, 'LinkedIn credentials saved.');
+  saveEnv(payload, 'Credenziali LinkedIn salvate.');
 }
 
 function saveCloudflare() {
   saveEnv({
     CLOUDFLARE_ACCOUNT_ID: document.getElementById('cf-account-id').value.trim(),
     CLOUDFLARE_API_TOKEN: document.getElementById('cf-api-token').value.trim()
-  }, 'Cloudflare credentials saved.');
+  }, 'Credenziali Cloudflare salvate.');
 }
 
 async function testInstantly() {
   const key = document.getElementById('instantly-key').value.trim();
   const el = document.getElementById('instantly-test-result');
-  el.innerHTML = '<div class="test-result pending">Testing&hellip;</div>';
+  el.innerHTML = '<div class="test-result pending">Verifica in corso&hellip;</div>';
   const data = await api('/api/settings/test-instantly', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({api_key: key})
   });
   if (!data) {
-    el.innerHTML = '<div class="test-result error">Could not reach the dashboard server.</div>';
+    el.innerHTML = '<div class="test-result error">Impossibile raggiungere il server del pannello.</div>';
     return;
   }
   el.innerHTML = '<div class="test-result ' + (data.success ? 'success' : 'error') + '">' + escHtml(data.message) + '</div>';
@@ -797,25 +819,25 @@ async function loadHarveyStatus() {
 
   if (!data) {
     headerDot.className = 'status-dot offline';
-    headerText.textContent = 'Offline';
+    headerText.textContent = 'Non raggiungibile';
     return;
   }
   const running = !!data.running;
 
   headerDot.className = 'status-dot ' + (running ? 'running' : 'stopped');
-  headerText.textContent = running ? 'Harvey is running' : 'Harvey is stopped';
+  headerText.textContent = running ? 'Harvey è in esecuzione' : 'Harvey è fermo';
   document.getElementById('control-dot').className = 'dot ' + (running ? 'running' : 'stopped');
   const label = document.getElementById('control-label');
   label.className = 'label ' + (running ? 'running' : 'stopped');
-  label.textContent = running ? 'Running' : 'Stopped';
+  label.textContent = running ? 'In esecuzione' : 'Fermo';
 
   const meta = document.getElementById('control-meta');
   if (running && data.pid) {
     let info = 'PID ' + escHtml(String(data.pid));
-    if (data.started_at) info += ' &middot; started ' + formatDate(data.started_at);
+    if (data.started_at) info += ' &middot; avviato il ' + formatDate(data.started_at);
     meta.innerHTML = info;
   } else {
-    meta.innerHTML = 'Harvey wakes every few minutes, does what needs doing, and sleeps.';
+    meta.innerHTML = 'Harvey controlla periodicamente il lavoro da svolgere, lo esegue e attende il ciclo successivo.';
   }
 
   document.getElementById('btn-start').style.display = running ? 'none' : '';
@@ -826,8 +848,8 @@ async function startHarvey() {
   const btn = document.getElementById('btn-start');
   btn.disabled = true;
   const data = await api('/api/harvey/start', {method: 'POST'});
-  if (data && data.success) showToast('Harvey started.', 'success');
-  else showToast((data && data.message) || 'Failed to start.', 'error');
+  if (data && data.success) showToast('Harvey avviato.', 'success');
+  else showToast((data && data.message) || 'Avvio non riuscito.', 'error');
   btn.disabled = false;
   loadHarveyStatus();
 }
@@ -836,8 +858,8 @@ async function stopHarvey() {
   const btn = document.getElementById('btn-stop');
   btn.disabled = true;
   const data = await api('/api/harvey/stop', {method: 'POST'});
-  if (data && data.success) showToast('Harvey stopped.', 'success');
-  else showToast((data && data.message) || 'Failed to stop.', 'error');
+  if (data && data.success) showToast('Harvey arrestato.', 'success');
+  else showToast((data && data.message) || 'Arresto non riuscito.', 'error');
   btn.disabled = false;
   loadHarveyStatus();
 }
@@ -850,7 +872,7 @@ async function loadLogs() {
     el.textContent = data.lines.join('\n');
     if (stick) el.scrollTop = el.scrollHeight;
   } else {
-    el.textContent = 'No logs yet. Start Harvey to see activity.';
+    el.textContent = 'Nessun registro disponibile. Avvia Harvey per vedere le attività.';
   }
 }
 
@@ -861,16 +883,16 @@ async function loadStats() {
   const data = await api('/api/stats');
   if (!data) { grid.innerHTML = offlineState(); return; }
   if (data.error) {
-    grid.innerHTML = emptyState('&#9670;', 'No pipeline data yet',
-      'Start Harvey from the <b>Controls</b> tab and it will begin prospecting, writing, and sending on its own.');
+    grid.innerHTML = emptyState('&#9670;', 'Nessun dato commerciale disponibile',
+      'Avvia Harvey dalla sezione <b>Controlli</b> per attivare il flusso configurato.');
     return;
   }
   const p = data.prospects || {}, c = data.campaigns || {}, v = data.conversations || {};
   const chips = (map) => {
     const entries = Object.entries(map || {});
-    if (!entries.length) return '<span class="chip muted">none yet</span>';
+    if (!entries.length) return '<span class="chip muted">nessuno</span>';
     return entries.map(([k, n]) =>
-      '<span class="chip">' + escHtml(k) + ' <b>' + escHtml(String(n)) + '</b></span>'
+      '<span class="chip">' + escHtml(statusMeta(k).label) + ' <b>' + escHtml(String(n)) + '</b></span>'
     ).join('');
   };
   const card = (label, value, breakdown) =>
@@ -879,22 +901,22 @@ async function loadStats() {
     '<div class="breakdown">' + breakdown + '</div></div>';
 
   grid.innerHTML =
-    card('Prospects', p.total || 0, chips(p.by_status)) +
-    card('Campaigns', c.total || 0, chips(c.by_status)) +
-    card('Conversations', v.total || 0, chips(v.by_status)) +
-    card('Actions Logged', data.actions_total || 0, brainCallChips(data));
+    card('Potenziali clienti', p.total || 0, chips(p.by_status)) +
+    card('Campagne', c.total || 0, chips(c.by_status)) +
+    card('Conversazioni', v.total || 0, chips(v.by_status)) +
+    card('Azioni registrate', data.actions_total || 0, brainCallChips(data));
 }
 
 // Calls today per subscription — each labelled with the provider it ran on.
 function brainCallChips(data) {
-  const chip = (label, n) => '<span class="chip">' + label + ' calls today <b>' + escHtml(String(n || 0)) + '</b></span>';
+  const chip = (label, n) => '<span class="chip">' + label + ' chiamate oggi <b>' + escHtml(String(n || 0)) + '</b></span>';
   const codex = data.codex_calls_today || 0;
   const st = data.brain_status || {};
   // A paused brain must not look healthy: say so, and why.
   const paused = st.status === 'paused'
-    ? '<span class="chip" title="' + escHtml(st.reason || '') + '">' +
-      escHtml(st.provider === 'codex' ? 'Codex' : 'Brain') + ' <b>paused</b>: ' +
-      escHtml((st.reason || '').slice(0, 120)) + '</span>'
+    ? '<span class="chip" title="' + escHtml(uiText(st.reason || '')) + '">' +
+      escHtml(st.provider === 'codex' ? 'Codex' : 'Modello') + ' <b>in pausa</b>: ' +
+      escHtml(uiText(st.reason || '').slice(0, 160)) + '</span>'
     : '';
   if (data.brain_provider === 'codex') {
     return paused + chip('Codex', codex) + (data.claude_calls_today ? chip('Claude', data.claude_calls_today) : '');
@@ -904,9 +926,9 @@ function brainCallChips(data) {
 
 function fmtTokens(n) {
   n = n || 0;
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  if (n >= 1e9) return (n / 1e9).toLocaleString('it-IT', {maximumFractionDigits:1}) + ' mld';
+  if (n >= 1e6) return (n / 1e6).toLocaleString('it-IT', {maximumFractionDigits:1}) + ' mln';
+  if (n >= 1e3) return (n / 1e3).toLocaleString('it-IT', {maximumFractionDigits:1}) + ' mila';
   return String(n);
 }
 
@@ -926,20 +948,20 @@ function emailTag(p) {
 function quotaCardHtml(data) {
   const provider = data && data.quota_provider;
   if (!provider) return '';
-  const title = provider === 'codex' ? 'Codex (ChatGPT plan) Quota' : 'Claude Subscription Quota';
+  const title = provider === 'codex' ? 'Quota Codex (piano ChatGPT)' : 'Quota abbonamento Claude';
   let html = '<h2>' + escHtml(title) + '</h2>';
   if (!data.quota || !Object.keys(data.quota).length) {
     const why = provider === 'codex'
-      ? "Quota unavailable: Harvey couldn't read your ChatGPT plan's limits (check codex login, the Codex CLI version, and network)."
-      : "Quota unavailable: Harvey couldn't read your Claude subscription's limits (check claude login and network).";
-    return html + '<p class="muted">' + escHtml(why) + ' Until it can, budgets count Harvey\'s own calls.</p>';
+      ? 'Quota non disponibile: impossibile leggere i limiti del piano ChatGPT. Controlla il login Codex, la versione della CLI e la rete.'
+      : 'Quota non disponibile: impossibile leggere i limiti del piano Claude. Controlla il login Claude e la rete.';
+    return html + '<p class="muted">' + escHtml(why) + ' Nel frattempo il limite viene calcolato sulle chiamate effettuate da Harvey.</p>';
   }
-  const labels = {five_hour: '5-hour window', seven_day: 'Weekly', primary: 'Primary window',
-                  secondary: 'Secondary window', limit_reached: 'Usage limit reached'};
+  const labels = {five_hour: 'Finestra di 5 ore', seven_day: 'Settimanale', primary: 'Finestra principale',
+                  secondary: 'Finestra secondaria', limit_reached: 'Limite di utilizzo raggiunto'};
   for (const [key, w] of Object.entries(data.quota)) {
     const pct = Math.min(100, Math.max(0, w.utilization || 0));
     const color = pct >= 80 ? 'yellow' : 'green';
-    const resets = w.resets_at ? 'resets ' + formatDate(w.resets_at) : '';
+    const resets = w.resets_at ? 'si rinnova il ' + formatDate(w.resets_at) : '';
     html += '<div class="progress-wrap">' +
       '<div class="progress-label">' +
         '<span class="text">' + escHtml(labels[key] || key) + (resets ? ' &middot; ' + escHtml(resets) : '') + '</span>' +
@@ -969,29 +991,29 @@ async function loadUsage() {
     return '<div class="stat-card"><div class="label">' + label + '</div>' +
       '<div class="value">' + (p.calls || 0) + '</div>' +
       '<div class="breakdown">' +
-        '<span class="chip">calls</span>' +
-        '<span class="chip">out <b>' + fmtTokens(p.output_tokens) + '</b></span>' +
-        '<span class="chip">in <b>' + fmtTokens(p.input_tokens) + '</b></span>' +
-        '<span class="chip">cached <b>' + fmtTokens(p.cache_read_tokens) + '</b></span>' +
+        '<span class="chip">chiamate</span>' +
+        '<span class="chip">uscita <b>' + fmtTokens(p.output_tokens) + '</b></span>' +
+        '<span class="chip">ingresso <b>' + fmtTokens(p.input_tokens) + '</b></span>' +
+        '<span class="chip">da cache <b>' + fmtTokens(p.cache_read_tokens) + '</b></span>' +
       '</div></div>';
   };
-  statsEl.innerHTML = card('Today', t.today) + card('Last 7 Days', t.week) + card('Last 30 Days', t.month);
+  statsEl.innerHTML = card('Oggi', t.today) + card('Ultimi 7 giorni', t.week) + card('Ultimi 30 giorni', t.month);
 
   // Daily bars — output tokens per day (the work done)
   const dailyEl = document.getElementById('usage-daily');
   const days = data.by_day || [];
   if (days.length) {
     const maxOut = Math.max(...days.map(d => d.output_tokens || 0), 1);
-    let dHtml = '<h2>Daily Output Tokens (30 days)</h2>';
+    let dHtml = '<h2>Token in uscita per giorno (30 giorni)</h2>';
     for (const d of days.slice(-30)) {
       const pct = Math.max(2, (d.output_tokens || 0) / maxOut * 100);
       dHtml += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:12px">' +
-        '<span class="muted" style="width:78px;flex-shrink:0;font-family:var(--mono)">' + escHtml(d.day || '') + '</span>' +
+        '<span class="muted" style="width:78px;flex-shrink:0;font-family:var(--mono)">' + escHtml(String(d.day || '').replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')) + '</span>' +
         '<div style="flex:1;background:rgba(255,255,255,0.05);border-radius:99px;height:10px;overflow:hidden">' +
           '<div style="width:' + pct + '%;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent-deep),var(--accent))"></div>' +
         '</div>' +
-        '<span style="width:130px;text-align:right;font-variant-numeric:tabular-nums">' + fmtTokens(d.output_tokens) + ' out' +
-          ' <span class="muted">&middot; ' + (d.calls || 0) + ' calls</span></span>' +
+        '<span style="width:130px;text-align:right;font-variant-numeric:tabular-nums">' + fmtTokens(d.output_tokens) + ' in uscita' +
+          ' <span class="muted">&middot; ' + (d.calls || 0) + ' chiamate</span></span>' +
       '</div>';
     }
     dailyEl.innerHTML = dHtml;
@@ -1005,10 +1027,10 @@ async function loadUsage() {
   const table = (title, rows, keyName) => {
     if (!rows || !rows.length) return '';
     let h = '<div class="card"><h2>' + title + '</h2><div class="table-card"><table><thead><tr>' +
-      '<th>' + keyName + '</th><th>Calls</th><th>Input</th><th>Output</th><th>Cache read</th>' +
+      '<th>' + ({Provider: 'Servizio', Agent: 'Agente', Task: 'Attività', Model: 'Modello'}[keyName] || keyName) + '</th><th>Chiamate</th><th>Ingresso</th><th>Uscita</th><th>Letti dalla cache</th>' +
       '</tr></thead><tbody>';
     for (const r of rows) {
-      h += '<tr><td>' + escHtml(String(r[keyName.toLowerCase()] || '')) + '</td>' +
+      h += '<tr><td>' + escHtml(uiTerm(String(r[keyName.toLowerCase()] || ''))) + '</td>' +
         '<td>' + (r.calls || 0) + '</td>' +
         '<td class="muted">' + fmtTokens(r.input_tokens) + '</td>' +
         '<td>' + fmtTokens(r.output_tokens) + '</td>' +
@@ -1019,16 +1041,16 @@ async function loadUsage() {
 
   const anyRows = (data.by_agent || []).length || (data.by_task || []).length;
   if (!anyRows) {
-    tablesEl.innerHTML = emptyState('&#9680;', 'No usage recorded yet',
-      'Once Harvey starts making model calls (Claude or Codex), every one is logged here with exact calls and tokens by provider, agent and task.');
+    tablesEl.innerHTML = emptyState('&#9680;', 'Nessun consumo registrato',
+      'Le chiamate al modello (Claude o Codex) saranno registrate qui con il consumo di token per servizio, agente e attività.');
   } else {
     const providers = data.by_provider || [];
     const showProviders = providers.length > 1 || (providers.length === 1 && providers[0].provider !== 'claude');
     tablesEl.innerHTML =
-      (showProviders ? table('By Provider (30 days)', providers, 'Provider') : '') +
-      table('By Agent (30 days)', data.by_agent, 'Agent') +
-      table('By Task (30 days)', data.by_task, 'Task') +
-      table('By Model (30 days)', data.by_model, 'Model');
+      (showProviders ? table('Per servizio (30 giorni)', providers, 'Provider') : '') +
+      table('Per agente (30 giorni)', data.by_agent, 'Agent') +
+      table('Per attività (30 giorni)', data.by_task, 'Task') +
+      table('Per modello (30 giorni)', data.by_model, 'Model');
   }
 }
 
@@ -1054,26 +1076,26 @@ async function loadOutbox() {
 
   actions.innerHTML =
     (pending.length && !data.paused
-      ? '<button class="btn btn-primary btn-sm" onclick="outboxApproveAll()">Approve all ' +
+      ? '<button class="btn btn-primary btn-sm" onclick="outboxApproveAll()">Approva tutte: ' +
         pending.length + '</button>' : '') +
     (data.paused
       ? '<button class="btn btn-secondary btn-sm" onclick="sendingToggle(\'resume\')">' +
-        'Resume sending</button>'
+        'Riprendi gli invii</button>'
       : '<button class="btn btn-secondary btn-sm" onclick="sendingToggle(\'pause\')">' +
-        'Pause all sending</button>');
+        'Sospendi tutti gli invii</button>');
 
   // The kill switch gets a banner only when it's actually on — a permanent
   // bar for a thing that isn't happening is just noise.
   banner.innerHTML = data.paused
     ? '<div class="card" style="border-color:var(--red);margin-bottom:16px">' +
-        '<h2 style="color:var(--red)">&#9888; Sending is paused</h2>' +
-        '<p style="color:var(--text-2);font-size:13px">' + escHtml(data.paused) +
-        '. Approved mail stays queued until you resume.</p></div>'
+        '<h2 style="color:var(--red)">&#9888; Invii sospesi</h2>' +
+        '<p style="color:var(--text-2);font-size:13px">' + escHtml(uiText(data.paused)) +
+        '. Le email approvate restano in coda fino alla ripresa degli invii.</p></div>'
     : '';
 
   desk.innerHTML = pending.length ? renderDesk(pending, _desk.i) :
-    '<div class="card">' + emptyState('&#10003;', 'Nothing to review',
-      'Every draft Harvey writes lands here first. Approve one and it sends on schedule.') +
+    '<div class="card">' + emptyState('&#10003;', 'Nessun messaggio da controllare',
+      'Le bozze di Harvey arrivano qui prima dell’invio. Dopo l’approvazione vengono inviate all’orario previsto.') +
     '</div>';
 
   const table = (title, rows, cols) => {
@@ -1088,17 +1110,17 @@ async function loadOutbox() {
   };
 
   list.innerHTML =
-    table('Approved &amp; scheduled', data.approved, [
-      ['To', r => r.to_email], ['Step', r => r.step], ['Subject', r => r.subject],
-      ['Sends', r => formatDate(r.send_at), true],
+    table('Approvate e programmate', data.approved, [
+      ['Destinatario', r => r.to_email], ['Passaggio', r => r.step], ['Oggetto', r => r.subject],
+      ['Invio previsto', r => formatDate(r.send_at), true],
     ]) +
-    table('Recently sent', data.sent, [
-      ['To', r => r.to_email], ['Step', r => r.step], ['Subject', r => r.subject],
-      ['Sent', r => formatDate(r.sent_at), true],
+    table('Inviate di recente', data.sent, [
+      ['Destinatario', r => r.to_email], ['Passaggio', r => r.step], ['Oggetto', r => r.subject],
+      ['Inviata', r => formatDate(r.sent_at), true],
     ]) +
-    table('Didn\'t send', data.failed, [
-      ['To', r => r.to_email], ['Status', r => badge(r.status), false, true],
-      ['Reason', r => r.error, true], ['Updated', r => formatDate(r.updated_at), true],
+    table('Non inviate', data.failed, [
+      ['Destinatario', r => r.to_email], ['Stato', r => badge(r.status), false, true],
+      ['Motivo', r => uiText(r.error), true], ['Aggiornamento', r => formatDate(r.updated_at), true],
     ]);
 }
 
@@ -1107,24 +1129,24 @@ function renderDesk(items, i) {
   const rail = items.map((it, n) =>
     '<div class="desk-item ' + (n === i ? 'active' : '') + '" onclick="deskGo(' + n + ')">' +
       '<div class="to">' + escHtml(it.to_email) + '</div>' +
-      '<div class="sub">' + escHtml(it.subject || '(no subject)') + '</div>' +
+      '<div class="sub">' + escHtml(it.subject || '(senza oggetto)') + '</div>' +
     '</div>').join('');
 
   return '<div class="desk">' +
     '<div class="desk-list">' + rail + '</div>' +
     '<div class="desk-pane">' +
-      '<div class="to-line">To <b>' + escHtml(cur.to_email) + '</b> &middot; step ' +
-        cur.step + ' (' + escHtml(cur.kind) + ') &middot; sends ' +
+      '<div class="to-line">Destinatario <b>' + escHtml(cur.to_email) + '</b> &middot; passaggio ' +
+        cur.step + ' (' + escHtml(uiTerm(cur.kind)) + ') &middot; invio ' +
         formatDate(cur.send_at) + '</div>' +
-      '<div class="subject">' + escHtml(cur.subject || '(no subject)') + '</div>' +
+      '<div class="subject">' + escHtml(cur.subject || '(senza oggetto)') + '</div>' +
       '<div class="body">' + escHtml(cur.body) + '</div>' +
       '<div class="desk-actions">' +
         '<button class="btn btn-primary" onclick="outboxAct(\'' + cur.id + '\',\'approve\')">' +
-          'Approve <kbd>A</kbd></button>' +
+          'Approva <kbd>A</kbd></button>' +
         '<button class="btn btn-secondary" onclick="outboxAct(\'' + cur.id + '\',\'reject\')">' +
-          'Reject <kbd>R</kbd></button>' +
+          'Rifiuta <kbd>R</kbd></button>' +
         '<span class="muted" style="font-size:12px;margin-left:auto">' +
-          (i + 1) + ' of ' + items.length + '</span>' +
+          (i + 1) + ' di ' + items.length + '</span>' +
       '</div>' +
     '</div></div>';
 }
@@ -1150,22 +1172,22 @@ document.addEventListener('keydown', e => {
 
 async function outboxAct(id, action) {
   const data = await api('/api/outbox/' + encodeURIComponent(id) + '/' + action, {method: 'POST'});
-  if (data && data.success) showToast(action === 'approve' ? 'Approved — will send on schedule.' : 'Rejected.', 'success');
-  else showToast('Action failed.', 'error');
+  if (data && data.success) showToast(action === 'approve' ? 'Approvata — sarà inviata all’orario previsto.' : 'Rifiutata.', 'success');
+  else showToast('Operazione non riuscita.', 'error');
   loadOutbox();
 }
 
 async function outboxApproveAll() {
   const data = await api('/api/outbox/approve-all', {method: 'POST'});
-  if (data && data.success) showToast('Approved ' + data.approved + ' email(s).', 'success');
-  else showToast('Approve-all failed.', 'error');
+  if (data && data.success) showToast('Email approvate: ' + data.approved + '.', 'success');
+  else showToast('Approvazione collettiva non riuscita.', 'error');
   loadOutbox();
 }
 
 async function sendingToggle(action) {
   const data = await api('/api/sending/' + action, {method: 'POST'});
-  if (data && data.success) showToast(action === 'pause' ? 'Sending paused.' : 'Sending resumed.', 'success');
-  else showToast('Failed.', 'error');
+  if (data && data.success) showToast(action === 'pause' ? 'Invii sospesi.' : 'Invii ripresi.', 'success');
+  else showToast('Operazione non riuscita.', 'error');
   loadOutbox();
 }
 
@@ -1176,11 +1198,11 @@ async function loadCompanies() {
   if (!data) { el.innerHTML = offlineState(); return; }
   _companies = data;
   if (!data.length) {
-    el.innerHTML = emptyState('&#9906;', 'No companies yet',
-      'Harvey\'s Scout agent hasn\'t researched any companies. Finish <b>Setup</b>, then start Harvey from the <b>Controls</b> tab.');
+    el.innerHTML = emptyState('&#9906;', 'Nessuna azienda presente',
+      'L’agente di ricerca non ha ancora analizzato aziende. Completa la configurazione e avvia Harvey dalla sezione <b>Controlli</b>.');
     return;
   }
-  let html = '<div class="table-card"><table><thead><tr><th>Company</th><th>Domain</th><th>Industry</th><th>Size</th><th>Location</th><th>Contacts</th><th>Source</th><th>Added</th></tr></thead><tbody>';
+  let html = '<div class="table-card"><table><thead><tr><th>Azienda</th><th>Dominio</th><th>Settore</th><th>Dimensioni</th><th>Località</th><th>Contatti</th><th>Fonte</th><th>Inserimento</th></tr></thead><tbody>';
   data.forEach((c, i) => {
     const website = c.website || (c.domain ? 'https://' + c.domain : '');
     const nameLink = website
@@ -1189,7 +1211,7 @@ async function loadCompanies() {
     html += '<tr style="cursor:pointer" onclick="showCompanyContacts(' + i + ')">' +
       '<td>' + nameLink + '</td><td class="muted">' + escHtml(c.domain) + '</td><td>' + escHtml(c.industry) + '</td>' +
       '<td>' + escHtml(c.company_size) + '</td><td>' + escHtml(c.location) + '</td>' +
-      '<td>' + (c.contact_count || 0) + '</td><td class="muted">' + escHtml(c.source) + '</td>' +
+      '<td>' + (c.contact_count || 0) + '</td><td class="muted">' + escHtml(uiTerm(c.source)) + '</td>' +
       '<td class="muted">' + formatDate(c.created_at) + '</td></tr>';
   });
   el.innerHTML = html + '</tbody></table></div>';
@@ -1201,20 +1223,20 @@ async function showCompanyContacts(index) {
   companyDrill = true;
   const el = document.getElementById('companies-list');
   const data = await api('/api/companies/' + encodeURIComponent(company.id) + '/contacts');
-  let html = '<div class="card"><h2>' + escHtml(company.name) + ' — Contacts</h2>' +
-    '<button class="btn btn-secondary btn-sm" onclick="loadCompanies()" style="margin-bottom:16px">&larr; Back to Companies</button>';
+  let html = '<div class="card"><h2>' + escHtml(company.name) + ' — Contatti</h2>' +
+    '<button class="btn btn-secondary btn-sm" onclick="loadCompanies()" style="margin-bottom:16px">&larr; Torna alle aziende</button>';
   if (!data || !data.length) {
-    html += '<p style="color:var(--text-3);font-size:13px">No contacts found at this company yet.</p></div>';
+    html += '<p style="color:var(--text-3);font-size:13px">Nessun contatto trovato per questa azienda.</p></div>';
   } else {
-    html += '<div class="table-card"><table><thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Phone</th><th>LinkedIn</th><th>Status</th><th>Source</th></tr></thead><tbody>';
+    html += '<div class="table-card"><table><thead><tr><th>Nome</th><th>Ruolo</th><th>Email</th><th>Telefono</th><th>LinkedIn</th><th>Stato</th><th>Fonte</th></tr></thead><tbody>';
     for (const p of data) {
       const emailIcon = emailTag(p);
       const phoneIcon = p.phone_verified ? ' <span class="verified">&#10003;</span>' : '';
       html += '<tr><td>' + escHtml(p.first_name) + ' ' + escHtml(p.last_name) + '</td>' +
         '<td>' + escHtml(p.title) + '</td><td>' + escHtml(p.email) + emailIcon + '</td>' +
         '<td>' + escHtml(p.phone) + phoneIcon + '</td>' +
-        '<td>' + (p.linkedin_url ? '<a href="' + escHtml(p.linkedin_url) + '" target="_blank" rel="noopener">Profile</a>' : '') + '</td>' +
-        '<td>' + badge(p.status) + '</td><td class="muted">' + escHtml(p.source) + '</td></tr>';
+        '<td>' + (p.linkedin_url ? '<a href="' + escHtml(p.linkedin_url) + '" target="_blank" rel="noopener">Profilo</a>' : '') + '</td>' +
+        '<td>' + badge(p.status) + '</td><td class="muted">' + escHtml(uiTerm(p.source)) + '</td></tr>';
     }
     html += '</tbody></table></div></div>';
   }
@@ -1222,24 +1244,24 @@ async function showCompanyContacts(index) {
 }
 
 async function submitFeedback(entityType, entityId, promptText) {
-  const comment = prompt(promptText || 'Add your feedback:');
+  const comment = prompt(promptText || 'Aggiungi una nota:');
   if (!comment) return;
   const data = await api('/api/feedback', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({entity_type: entityType, entity_id: entityId, comment: comment})
   });
-  if (data && data.success) showToast('Feedback saved. Harvey will take it into account.', 'success');
-  else showToast((data && data.message) || 'Could not save feedback.', 'error');
+  if (data && data.success) showToast('Nota salvata. Harvey ne terrà conto.', 'success');
+  else showToast((data && data.message) || 'Impossibile salvare la nota.', 'error');
 }
 
 function fbProspect(i) {
   const p = _prospects[i];
-  if (p) submitFeedback('contact', p.id, 'Feedback on this contact:');
+  if (p) submitFeedback('contact', p.id, 'Nota su questo contatto:');
 }
 
 function fbCampaign(i) {
   const c = _campaigns[i];
-  if (c) submitFeedback('campaign', c.id, 'Leave feedback on this campaign:');
+  if (c) submitFeedback('campaign', c.id, 'Nota su questa campagna:');
 }
 
 async function loadProspects() {
@@ -1248,19 +1270,19 @@ async function loadProspects() {
   if (!data) { el.innerHTML = offlineState(); return; }
   _prospects = data;
   if (!data.length) {
-    el.innerHTML = emptyState('&#9673;', 'No contacts yet',
-      'Harvey hasn\'t found any prospects. Once it\'s running, the Scout agent searches the web for people matching your ideal customer profile in <b>harvey.yaml</b>.');
+    el.innerHTML = emptyState('&#9673;', 'Nessun contatto presente',
+      'Harvey non ha ancora trovato potenziali clienti. Una volta avviato, l’agente di ricerca cerca persone coerenti con il profilo cliente nella configurazione attiva.');
     return;
   }
-  let html = '<div class="table-card"><table><thead><tr><th>Name</th><th>Title</th><th>Company</th><th>Email</th><th>Phone</th><th>Status</th><th>Source</th><th>Added</th><th></th></tr></thead><tbody>';
+  let html = '<div class="table-card"><table><thead><tr><th>Nome</th><th>Ruolo</th><th>Azienda</th><th>Email</th><th>Telefono</th><th>Stato</th><th>Fonte</th><th>Inserimento</th><th></th></tr></thead><tbody>';
   data.forEach((p, i) => {
     const emailV = p.email ? (escHtml(p.email) + emailTag(p)) : '';
     const phoneV = p.phone ? (escHtml(p.phone) + (p.phone_verified ? ' <span class="verified">&#10003;</span>' : '')) : '';
     html += '<tr><td>' + escHtml(p.first_name) + ' ' + escHtml(p.last_name) + '</td>' +
       '<td>' + escHtml(p.title) + '</td><td>' + escHtml(p.company) + '</td>' +
       '<td>' + emailV + '</td><td>' + phoneV + '</td><td>' + badge(p.status) + '</td>' +
-      '<td class="muted">' + escHtml(p.source) + '</td><td class="muted">' + formatDate(p.created_at) + '</td>' +
-      '<td><button class="btn btn-secondary btn-sm" onclick="fbProspect(' + i + ')">Feedback</button></td></tr>';
+      '<td class="muted">' + escHtml(uiTerm(p.source)) + '</td><td class="muted">' + formatDate(p.created_at) + '</td>' +
+      '<td><button class="btn btn-secondary btn-sm" onclick="fbProspect(' + i + ')">Nota</button></td></tr>';
   });
   el.innerHTML = html + '</tbody></table></div>';
 }
@@ -1271,8 +1293,8 @@ async function loadCampaigns() {
   if (!data) { el.innerHTML = offlineState(); return; }
   _campaigns = data;
   if (!data.length) {
-    el.innerHTML = emptyState('&#9993;', 'No campaigns yet',
-      'The Writer agent hasn\'t drafted any sequences. It kicks in automatically once Harvey has scored prospects to write for.');
+    el.innerHTML = emptyState('&#9993;', 'Nessuna campagna presente',
+      'L’agente di scrittura non ha ancora preparato sequenze. Si attiva quando ci sono potenziali clienti valutati per cui scrivere.');
     return;
   }
   let html = '';
@@ -1280,16 +1302,16 @@ async function loadCampaigns() {
     let stepsHtml = '';
     for (const step of (c.sequence || [])) {
       stepsHtml += '<div class="email-step"><div class="step-num">Email ' + escHtml(String(step.step || '?')) +
-        (step.delay_days ? ' &middot; send after ' + escHtml(String(step.delay_days)) + ' days' : '') + '</div>' +
+        (step.delay_days ? ' &middot; invia dopo ' + escHtml(String(step.delay_days)) + ' giorni' : '') + '</div>' +
         '<div class="subject">' + escHtml(step.subject) + '</div>' +
         '<div class="body">' + escHtml(step.body) + '</div></div>';
     }
     const pc = (c.prospect_ids || []).length;
-    html += '<div class="campaign-card"><h3>' + escHtml(c.name || 'Untitled Campaign') + '</h3>' +
+    html += '<div class="campaign-card"><h3>' + escHtml(c.name || 'Campagna senza titolo') + '</h3>' +
       '<div class="meta">' + badge(c.status) + '<span>' + escHtml(c.channel || 'email') + '</span>' +
-      '<span>' + pc + ' prospect' + (pc !== 1 ? 's' : '') + '</span><span>' + formatDate(c.created_at) + '</span>' +
-      '<button class="btn btn-secondary btn-sm" onclick="fbCampaign(' + i + ')">Feedback</button></div>' +
-      (stepsHtml || '<p style="color:var(--text-3);font-size:13px">No email steps in this campaign.</p>') + '</div>';
+      '<span>' + pc + (pc === 1 ? ' potenziale cliente' : ' potenziali clienti') + '</span><span>' + formatDate(c.created_at) + '</span>' +
+      '<button class="btn btn-secondary btn-sm" onclick="fbCampaign(' + i + ')">Nota</button></div>' +
+      (stepsHtml || '<p style="color:var(--text-3);font-size:13px">Questa campagna non contiene email.</p>') + '</div>';
   });
   el.innerHTML = html;
 }
@@ -1299,8 +1321,8 @@ async function loadConversations() {
   const data = await api('/api/conversations');
   if (!data) { el.innerHTML = offlineState(); return; }
   if (!data.length) {
-    el.innerHTML = emptyState('&#9737;', 'No conversations yet',
-      'No prospects have replied so far. When they do, the Handler agent classifies each reply and responds — every thread shows up here.');
+    el.innerHTML = emptyState('&#9737;', 'Nessuna conversazione presente',
+      'Nessun potenziale cliente ha ancora risposto. Quando arriva una risposta, l’agente di gestione la classifica e prepara il seguito: le conversazioni appariranno qui.');
     return;
   }
   let html = '';
@@ -1308,15 +1330,15 @@ async function loadConversations() {
     let threadHtml = '';
     for (const msg of (c.thread || [])) {
       const cls = msg.sender === 'harvey' ? 'sent' : 'received';
-      threadHtml += '<div class="thread-msg ' + cls + '"><div class="sender">' + escHtml(msg.sender) +
+      threadHtml += '<div class="thread-msg ' + cls + '"><div class="sender">' + escHtml(msg.sender === 'prospect' ? 'Contatto' : uiTerm(msg.sender)) +
         ' &middot; ' + formatDate(msg.timestamp) + '</div>' + escHtml(msg.content) + '</div>';
     }
-    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Unknown';
+    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Sconosciuto';
     html += '<div class="convo-card"><h3>' + escHtml(name) +
       (c.company ? ' <span style="color:var(--text-3);font-weight:500">&mdash; ' + escHtml(c.company) + '</span>' : '') + '</h3>' +
       '<div class="meta">' + badge(c.status) + (c.intent ? badge(c.intent) : '') +
       '<span>' + escHtml(c.prospect_email || '') + '</span><span>' + formatDate(c.updated_at) + '</span></div>' +
-      (threadHtml || '<p style="color:var(--text-3);font-size:13px">No messages in this thread yet.</p>') + '</div>';
+      (threadHtml || '<p style="color:var(--text-3);font-size:13px">Questa conversazione non contiene ancora messaggi.</p>') + '</div>';
   }
   el.innerHTML = html;
 }
@@ -1326,15 +1348,15 @@ async function loadActivity() {
   const data = await api('/api/activity');
   if (!data) { el.innerHTML = offlineState(); return; }
   if (!data.length) {
-    el.innerHTML = emptyState('&#9202;', 'No activity yet',
-      'Harvey hasn\'t taken any actions. Every prospect found, email written, and reply handled will appear here the moment it happens.');
+    el.innerHTML = emptyState('&#9202;', 'Nessuna attività presente',
+      'Harvey non ha ancora svolto attività. Qui appariranno i contatti trovati, le email preparate e le risposte gestite.');
     return;
   }
   let html = '<div class="activity-feed">';
   for (const a of data) {
     html += '<div class="activity-item"><span class="time">' + formatDate(a.created_at) + '</span>' +
-      '<span class="agent">' + escHtml(a.agent) + '</span>' +
-      '<span class="action">' + escHtml(a.action_type) + '</span></div>';
+      '<span class="agent">' + escHtml(uiTerm(a.agent)) + '</span>' +
+      '<span class="action">' + escHtml(uiTerm(a.action_type)) + '</span></div>';
   }
   el.innerHTML = html + '</div>';
 }

@@ -254,3 +254,28 @@ async def test_derive_pattern_spends_and_respects_hunter_budget(state, monkeypat
     _, source, _ = await derive_pattern("second-co.com", state=state)
     assert source == "default"
     assert calls == ["first-co.com"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('payload,expected', [
+    ({'status':'safe','is_safe_to_send':True,'is_deliverable':True,'is_catch_all':False}, 'verified'),
+    ({'status':'safe','is_safe_to_send':True,'is_deliverable':True,'is_catch_all':True}, 'risky'),
+    ({'status':'safe','is_safe_to_send':False,'is_catch_all':False}, None),
+    ({'status':'safe','is_deliverable':False,'is_catch_all':False}, None),
+    ({'status':'safe','is_disposable':True,'is_catch_all':False}, 'invalid'),
+    ({'status':'spamtrap','is_catch_all':True}, 'invalid'),
+    ({'status':'role_account','is_catch_all':False}, None),
+    ({'status':'unknown','is_catch_all':False}, None),
+    ({'status':'inbox_full','is_catch_all':False}, None),
+])
+async def test_reoon_power_verdicts(payload, expected, monkeypatch):
+    import httpx
+    original_client = httpx.AsyncClient
+    def respond(request):
+        assert request.url.params['mode'] == 'power'
+        return httpx.Response(200, json=payload)
+    def client(**kwargs):
+        return original_client(transport=httpx.MockTransport(respond), **kwargs)
+    monkeypatch.setattr(ef.httpx, 'AsyncClient', client)
+    verdict = await ef.verify_reoon('test@example.com', 'local-test-key')
+    assert ef._status_from_verdict(verdict) == expected

@@ -434,7 +434,7 @@ def _answering(answers, prompts):
 
 
 @pytest.mark.parametrize("answers, expected", [
-    (["codex", ""], BrainConfig(provider="codex", model="gpt-5.5")),         # accept suggestion
+    (["codex", ""], BrainConfig(provider="codex", model="gpt-6-luna")),         # accept suggestion
     (["codex", "gpt-6-sol"], BrainConfig(provider="codex", model="gpt-6-sol")),  # explicit kept
     (["codex", "--model", "my-model"], BrainConfig(provider="codex", model="my-model")),
     (["claude", ""], BrainConfig()),
@@ -596,7 +596,8 @@ def _render_js(func: str, data, helpers=("escHtml", "formatDate")) -> str:
         match = re.search(rf"^function {name}\(.*?^}}\n", source, re.S | re.M)
         assert match, name
         funcs.append(match.group(0))
-    script = "\n".join(funcs) + f"\nprocess.stdout.write({func}({json.dumps(data)}));"
+    locale = (Path(dash.__file__).parent / "web" / "italian.js").read_text()
+    script = locale + "\n" + "\n".join(funcs) + f"\nprocess.stdout.write({func}({json.dumps(data)}));"
     return subprocess.run([node, "-e", script], capture_output=True, text=True,
                           check=True, timeout=30).stdout
 
@@ -615,9 +616,9 @@ def test_paused_brain_is_visible_on_the_dashboard(client, monkeypatch):
     stats = client.get("/api/stats").json()
     assert stats["brain_status"]["status"] == "paused"
     html = _render_js("brainCallChips", stats)
-    assert "Codex <b>paused</b>" in html and "login has expired" in html
+    assert "Codex <b>in pausa</b>" in html and "login Codex è scaduto" in html
     healthy = _render_js("brainCallChips", {**stats, "brain_status": {}})
-    assert "paused" not in healthy
+    assert "in pausa" not in healthy
 
 
 def _status_cli(monkeypatch, tmp_path, capsys, *, check, config, setting=""):
@@ -675,8 +676,8 @@ def test_cli_status_check_reports_readiness(monkeypatch, tmp_path, capsys):
 def test_quota_card_renders_unavailable_codex_quota():
     html = _render_quota_card({"quota_provider": "codex", "quota_status": "unavailable",
                                "quota": None})
-    assert "Codex (ChatGPT plan) Quota" in html
-    assert "Quota unavailable" in html and "ChatGPT plan" in html
+    assert "Quota Codex (piano ChatGPT)" in html
+    assert "Quota non disponibile" in html and "piano ChatGPT" in html
     assert "progress-bar" not in html
 
 
@@ -684,10 +685,10 @@ def test_quota_card_renders_gauges_and_limit_reached():
     html = _render_quota_card({"quota_provider": "codex", "quota_status": "available",
                                "quota": {"limit_reached": {"utilization": 100.0,
                                                            "resets_at": ""}}})
-    assert "Usage limit reached" in html and "100%" in html
+    assert "Limite di utilizzo raggiunto" in html and "100%" in html
     assert _render_quota_card({"quota_provider": "", "quota": None}) == ""
     claude = _render_quota_card({"quota_provider": "claude", "quota": None})
-    assert "Claude Subscription Quota" in claude and "unavailable" in claude
+    assert "Quota abbonamento Claude" in claude and "non disponibile" in claude
 
 
 def test_cli_usage_reads_only_the_active_providers_quota(monkeypatch, tmp_path, capsys):
@@ -744,3 +745,25 @@ def test_cli_status_hides_another_providers_pause(monkeypatch, tmp_path, capsys)
                       config=BrainConfig(provider="codex", model="gpt-5.5"),
                       setting=_STALE_CODEX_PAUSE)
     assert "Codex PAUSED" in out
+
+
+@pytest.mark.asyncio
+async def test_unslop_is_injected_into_text_tasks_and_preserves_json(state, monkeypatch, tmp_path):
+    monkeypatch.setattr(brain_mod, 'SKILLS_DIR', tmp_path)
+    style_file = tmp_path / 'unslop.md'
+    style_file.write_text('# Unslop\nRemove canned openings.')
+    brain = _codex_brain(state, [])
+    prompts = []
+    async def run(prompt, timeout, skip_if=None):
+        prompts.append(prompt)
+        return CodexResult(text='{"subject":"Test","body":"Ciao"}', model='gpt-6-luna')
+    brain.codex.run = run
+    result = await brain.think_json('Write an email as JSON.', agent='writer', task='write_sequence')
+    assert result == {'subject': 'Test', 'body': 'Ciao'}
+    assert '# Unslop' in prompts[0] and 'Remove canned openings.' in prompts[0]
+    assert 'Do not change JSON structure' in prompts[0]
+    assert 'Respond ONLY with valid JSON' in prompts[0]
+    style_file.write_text('# Unslop\nKeep the next message concrete.')
+    await brain.think('Write product knowledge.', session_id='harvey-trainer')
+    assert 'Keep the next message concrete.' in prompts[1]
+    assert 'Remove canned openings.' not in prompts[1]

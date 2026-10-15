@@ -17,7 +17,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from harvey.brain import Brain
-from harvey.config import HarveyConfig, EnvConfig
+from harvey.config import ComplianceConfig, HarveyConfig, EnvConfig
 from harvey.gate import pre_send_check
 from harvey.integrations.instantly import InstantlyClient
 from harvey.integrations.mail_provider import NATIVE_PROVIDERS, get_mail_provider
@@ -64,6 +64,12 @@ class Sender:
         self.provider = get_mail_provider(config, env)
         # Disabled in tests to skip inter-send sleeps.
         self.send_pacing = True
+        self.pilot = None
+        pilot_config = getattr(config.channels.email, "pilot", None)
+        if pilot_config and pilot_config.enabled:
+            from harvey.outreach import OutreachPilot
+
+            self.pilot = OutreachPilot(state, pilot_config, config.usage.quiet_hours.timezone)
 
     @property
     def is_native(self) -> bool:
@@ -345,6 +351,15 @@ class Sender:
             text = text.replace("{{ " + key + " }}", value or "")
         return text.strip()
 
+    def _finalize_sequence_body(self, body: str) -> str:
+        """Append each configured footer component once."""
+        compliance = getattr(self.config, "compliance", ComplianceConfig())
+        for component in (compliance.postal_address, compliance.opt_out_line):
+            component = component.strip()
+            if component and component not in body:
+                body = body.rstrip() + "\n\n" + component
+        return body
+
     async def _stage_campaign_native(self, campaign):
         """Render + schedule a draft campaign's emails into the outbox."""
         if not self._validate_sequence(campaign):
@@ -382,6 +397,8 @@ class Sender:
 
             cumulative_days = 0
             for step in campaign.sequence:
+                if self.pilot and step.step != 1:
+                    continue
                 cumulative_days += max(0, step.delay_days)
                 send_at = now + timedelta(days=cumulative_days)
                 item_id = await self.state.add_outbox_item(
@@ -434,8 +451,16 @@ class Sender:
             return
 
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        compliance = getattr(self.config, "compliance", ComplianceConfig())
+        address_missing = not compliance.postal_address.strip()
+        if address_missing:
+            logger.warning(
+                "Sender: email iniziali in attesa. Configura "
+                "compliance.postal_address in harvey.yaml. Le risposte restano abilitate."
+            )
         due = await self.state.get_outbox(
-            status="approved", due_before=now, limit=budget * 3
+            status="approved", due_before=now, limit=budget * 3,
+            kind="reply" if address_missing else None,
         )
         if not due:
             return
@@ -461,9 +486,14 @@ class Sender:
                 )
                 continue
 
+            body = item["body"]
+            if item["kind"] == "sequence":
+                body = self._finalize_sequence_body(body)
             gate = pre_send_check(
-                item["to_email"], item["subject"], item["body"],
+                item["to_email"], item["subject"], body,
                 prospect=prospect, allow_risky=allow_risky, kind=item["kind"],
+                postal_address=compliance.postal_address,
+                opt_out_line=compliance.opt_out_line,
             )
             if not gate:
                 await self.state.update_outbox_item(
@@ -476,21 +506,42 @@ class Sender:
                 )
                 continue
 
+            if self.pilot and item["kind"] == "sequence":
+                if item["step"] != 1:
+                    await self.state.update_outbox_item(
+                        item["id"], status="cancelled", error="pilot: first contact only"
+                    )
+                    continue
+                company = await self.state.get_company(prospect.company_id)
+                reason = await self.pilot.reserve(company, item["id"])
+                if reason:
+                    if reason in {"already_reserved", "already_contacted", "expired"}:
+                        await self.state.update_outbox_item(
+                            item["id"], status="cancelled", error="pilot: " + reason
+                        )
+                    logger.info("Sender: pilot held item %s (%s)", item["id"], reason)
+                    continue
+
             result = await self.provider.send_email(
-                item["to_email"], item["subject"], item["body"],
+                item["to_email"], item["subject"], body,
                 thread_ref=item.get("thread_ref", ""),
                 in_reply_to=item.get("in_reply_to", ""),
             )
             if not result.ok:
+                # Providers currently collapse rejections and network timeouts
+                # into ok=False. Keep the reservation: a timeout may have sent.
                 await self.state.update_outbox_item(
                     item["id"], status="failed", error=result.error[:300]
                 )
                 continue
 
+            if self.pilot and item["kind"] == "sequence":
+                await self.pilot.finish(item["id"], success=True)
+
             sent += 1
             now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
             await self.state.update_outbox_item(
-                item["id"], status="sent", sent_at=now_iso,
+                item["id"], status="sent", sent_at=now_iso, body=body,
                 message_id=result.message_id, thread_ref=result.thread_ref,
             )
             if prospect.status in ("new", "queued"):

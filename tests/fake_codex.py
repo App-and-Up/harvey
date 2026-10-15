@@ -11,11 +11,14 @@ import json
 import os
 import sys
 import time
+import tomllib
 
 SCENARIO, LOG = sys.argv[1], sys.argv[2]
 ARGS = sys.argv[3:]
 
 CATALOG = {"models": [
+    {"slug": "gpt-6-luna", "visibility": "list", "priority": 2,
+     "tool_mode": "code_mode_only", "experimental_supported_tools": ["clock"]},
     {"slug": "gpt-6.1-sol", "visibility": "list", "priority": 1,
      "tool_mode": "code_mode_only", "experimental_supported_tools": ["clock"]},
     {"slug": "gpt-5.5", "visibility": "list", "priority": 13,
@@ -57,15 +60,20 @@ if ARGS[:2] == ["debug", "models"]:
          "home": os.environ.get("HOME"), "codex_home": os.environ.get("CODEX_HOME")})
     catalog = dict(CATALOG)
     if SCENARIO == "no_toolless_model":
-        catalog = {"models": [CATALOG["models"][0]]}
+        catalog = {"models": [{**CATALOG["models"][0], "tool_mode": "future_mode"}]}
     if SCENARIO == "unlisted_toolless":
         # The tool-less model is in the catalog but not listed in the picker.
-        catalog = {"models": [CATALOG["models"][0], {**CATALOG["models"][1], "visibility": "hide"}]}
+        catalog = {"models": [{**m, "visibility": "hide"} for m in CATALOG["models"]]}
     sys.stdout.write(json.dumps(catalog))
     sys.exit(0)
 
 assert ARGS[:1] == ["app-server"], ARGS
 SNAPSHOT = read_auth()
+with open(os.path.join(os.environ["CODEX_HOME"], "config.toml"), "rb") as f:
+    catalog_path = tomllib.load(f).get("model_catalog_json")
+if catalog_path:
+    with open(catalog_path) as f:
+        log({"private_catalog": json.load(f)})
 log({"cmd": "app-server", "pid": os.getpid(), "cwd": os.getcwd(), "argv": ARGS,
      "env_keys": sorted(os.environ), "home": os.environ.get("HOME"),
      "codex_home": os.environ.get("CODEX_HOME"),
@@ -104,6 +112,10 @@ def effective_config():
         "skills": {"include_instructions": False, "bundled": {"enabled": False}},
         "agents": {"enabled": False}, "mcp_servers": {},
     }
+    with open(os.path.join(os.environ["CODEX_HOME"], "config.toml"), "rb") as f:
+        config["model_catalog_json"] = tomllib.load(f).get("model_catalog_json")
+    if SCENARIO == "catalog_override" and SNAPSHOT is not None:
+        config["model_catalog_json"] = "/tmp/foreign-models.json"
     if SCENARIO == "feature_on":
         config["features"]["shell_tool"] = True
     if SCENARIO == "custom_provider":

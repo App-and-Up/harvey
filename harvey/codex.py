@@ -19,9 +19,11 @@ Before any prompt is sent, the runtime has to prove it:
    endpoint, ChatGPT-only login, file credential storage, no custom provider
    definitions and no other endpoint anywhere in the config. Only then is the
    login exposed: the runtime is restarted with it, and checked again.
-2. The model must not be one of Codex's "code mode" models, which always
-   carry code-execution tools no setting removes (checked against the model
-   catalog ``codex debug models`` reports for this runtime).
+2. The model must exist in the runtime catalog. A private copy keeps its
+   capabilities while forcing direct tool mode and no experimental tools.
+   The restarted runtime must report that exact private catalog path.
+   GPT-6 Luna uses the separate subscription text transport instead; the
+   CLI checks its account and catalog, then exits before inference.
 3. ``account/read`` must report a ChatGPT account (never an API key, so a
    call is never billed per token).
 4. The thread starts with no environments (no exec or file-edit tools), no
@@ -94,10 +96,12 @@ def require_supported_platform() -> None:
 # tool Harvey's lockdown doesn't know about.
 SUPPORTED_CODEX_VERSIONS = ("0.159.3",)
 CODEX_INSTALL_HINT = f"npm install -g @openai/codex@{SUPPORTED_CODEX_VERSIONS[-1]}"
-# The model setup suggests: verified text-only (no code mode, no extra tools)
-# with 0.159.3, and callable on ChatGPT plans even where the live catalog
-# hides it from the picker, so blank auto-selection can't find it.
-SUGGESTED_MODEL = "gpt-5.5"
+# The setup suggests the model verified through the subscription text
+# transport. Code-mode tools are not offered to the model on that transport.
+SUGGESTED_MODEL = "gpt-6-luna"
+# These models use the subscription's text transport, never a CLI turn. Keep
+# this explicit: every additional model needs a real transport verification.
+SUBSCRIPTION_TEXT_MODELS = frozenset({"gpt-6-luna"})
 
 # An access token closer than this to expiry is treated as expired: the
 # runtime can't renew it, so the call would fail part-way.
@@ -528,7 +532,7 @@ def build_child_env(private_root: str, codex_home: str, base_env=None) -> dict:
     return env
 
 
-def attest_effective_config(response) -> list[str]:
+def attest_effective_config(response, model_catalog_path: str = "") -> list[str]:
     """Check config/read output; return inherited MCP server names."""
     if not isinstance(response, dict) or not isinstance(response.get("config"), dict):
         raise _isolation_error("config/read returned no effective config")
@@ -544,6 +548,10 @@ def attest_effective_config(response) -> list[str]:
     if config.get("chatgpt_base_url") not in (None, DEFAULT_CHATGPT_BASE_URL):
         raise _isolation_error("a custom ChatGPT endpoint is configured")
     for key in MUST_BE_EMPTY:
+        if key == "model_catalog_json" and model_catalog_path:
+            if config.get(key) != model_catalog_path:
+                raise _isolation_error("the private model catalog was overridden")
+            continue
         if config.get(key) not in (None, "", [], {}):
             raise _isolation_error(f"setting '{key}' is set by another config layer")
     endpoint = _find_custom_endpoint(config)
@@ -666,19 +674,31 @@ def parse_model_catalog(raw: bytes) -> dict:
 
 
 def model_tools_removable(entry) -> bool:
-    """Whether Harvey's lockdown leaves this model with no tools at all.
+    """Whether an effective catalog entry respects the text-only lockdown.
 
-    Models in Codex's code mode (``tool_mode``) always get its JavaScript
-    ``exec``/``wait``/user-input tools, and some get extra experimental
-    tools; no supported setting removes them. Verified against the Codex
-    CLI with a local mock model server: other models receive an empty tool
-    list under Harvey's lockdown.
+    Direct mode adds no execution wrapper. With no environments and all
+    tool-providing features disabled, the pinned CLI sends no tools.
     """
     return (
         isinstance(entry, dict)
-        and entry.get("tool_mode") in (None, "")
+        and entry.get("tool_mode") in (None, "", "direct")
         and not entry.get("experimental_supported_tools")
     )
+
+
+def text_only_catalog(catalog: dict) -> dict:
+    """Keep model capabilities, but remove model-forced tools in our runtime.
+
+    The pinned CLI honors a private model_catalog_json before building its
+    tool registry. Direct mode respects the existing no-environments and
+    disabled-feature lockdown. Unknown tool modes still fail closed.
+    """
+    return {
+        slug: {**entry, "tool_mode": "direct", "experimental_supported_tools": []}
+        if entry.get("tool_mode") in (None, "", "direct", "code_mode", "code_mode_only")
+        else dict(entry)
+        for slug, entry in catalog.items()
+    }
 
 
 def _safe_name(value) -> str:
@@ -690,7 +710,7 @@ def describe_model(entry) -> str:
     """Why a catalog entry can or can't be used, in a few words."""
     if not isinstance(entry, dict):
         return "unreadable"
-    if entry.get("tool_mode") not in (None, ""):
+    if entry.get("tool_mode") not in (None, "", "direct"):
         return f"code mode ({_safe_name(entry['tool_mode'])})"
     extra = entry.get("experimental_supported_tools")
     if extra:
@@ -937,6 +957,7 @@ class _AppServer:
         self.codex_home = ""
         self.workspace = ""
         self.version = ""
+        self.model_catalog_path = ""
         self.proc: asyncio.subprocess.Process | None = None
         self._next_id = 1
         self._stderr_tail = b""
@@ -975,6 +996,17 @@ class _AppServer:
                 f"Could not prepare Codex's private login copy ({type(e).__name__}).",
                 kind="runtime",
             ) from None
+
+    def install_model_catalog(self, catalog: dict) -> None:
+        """Install Harvey's generated catalog in this disposable runtime only."""
+        self.model_catalog_path = os.path.join(self.codex_home, "text-models.json")
+        with open(self.model_catalog_path, "x", encoding="utf-8") as f:
+            json.dump({"models": list(catalog.values())}, f)
+        path = os.path.join(self.codex_home, "config.toml")
+        with open(path, encoding="utf-8") as f:
+            config = f.read()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"model_catalog_json = {_toml_value(self.model_catalog_path)}\n" + config)
 
     def _child_kwargs(self) -> dict:
         # Own process group, so the whole tree can be killed.
@@ -1256,9 +1288,10 @@ class CodexClient:
         """Everything a real call checks, short of sending a prompt: the CLI
         version, the route and lockdown (attested with no login in the
         runtime), the native login (read only; expiry and renewal), the
-        configured model against the catalog (no code mode, no extra tools),
-        the ChatGPT account, and a thread started with no tools, no
-        instructions and no MCP servers or hooks. No turn is started, so
+        configured model against the catalog and the ChatGPT account.
+        Legacy models also start a thread with no tools, instructions, MCP
+        servers or hooks. Luna has no CLI thread: inference uses the separate
+        subscription text transport with no tools. No turn is started, so
         nothing is inferred or metered as a model call; the runtime only ever
         holds the access-only login copy. Raises CodexError."""
         return await self._bounded(timeout, self._preflight)
@@ -1266,7 +1299,10 @@ class CodexClient:
     async def _preflight(self, deadline: float) -> None:
         server = _AppServer(self._resolve_codex())
         try:
-            await self._attested_thread(server, deadline)
+            if self.model in SUBSCRIPTION_TEXT_MODELS:
+                await self._attested_text_account(server, deadline)
+            else:
+                await self._attested_thread(server, deadline)
         finally:
             await server.close()
 
@@ -1307,12 +1343,14 @@ class CodexClient:
         server.install_auth(snapshot)
         model = self.model
         if toolless_model or not model:
-            catalog = await server.read_catalog(deadline)
+            catalog = text_only_catalog(await server.read_catalog(deadline))
             model = model or self._default_model(catalog)
             if toolless_model:
                 require_toolless_model(catalog, model)
+                server.install_model_catalog(catalog)
         await server.launch(deadline)
-        mcp_names = attest_effective_config(await server.read_config(deadline))
+        mcp_names = attest_effective_config(
+            await server.read_config(deadline), server.model_catalog_path)
         await self._require_chatgpt(server, deadline)
         return model, mcp_names
 
@@ -1321,19 +1359,43 @@ class CodexClient:
         the configured model; returns (thread id, model). Nothing is sent to
         the model."""
         model, mcp_names = await self._open_session(server, deadline, toolless_model=True)
+        params = build_thread_params(server.workspace, model, mcp_names)
+        params["config"]["model_catalog_json"] = server.model_catalog_path
         thread_id, model = attest_thread(await server.request(
-            "thread/start", build_thread_params(server.workspace, model, mcp_names),
-            deadline), model)
+            "thread/start", params, deadline), model)
         attest_mcp_status(
             await self._mcp_status_pages(server, thread_id, deadline), mcp_names)
         attest_hooks(await server.request(
             "hooks/list", {"cwds": [server.workspace]}, deadline))
         return thread_id, model
 
+    async def _attested_text_account(self, server: _AppServer, deadline: float) -> str:
+        """Attest CLI configuration/account and catalog without starting a turn.
+
+        Luna keeps its verified text transport, sending an empty tool list
+        directly to Codex's fixed ChatGPT endpoint. The CLI receives credentials for account checks, but never
+        receives scraped text, email replies, or any other inference prompt.
+        """
+        model, _ = await self._open_session(server, deadline, toolless_model=False)
+        catalog = await server.read_catalog(deadline)
+        if model not in SUBSCRIPTION_TEXT_MODELS or model not in catalog:
+            raise _isolation_error(f"subscription text model '{model}' is not in the verified catalog")
+        return model
+
     async def _run(self, prompt: str, deadline: float) -> CodexResult:
         server = _AppServer(self._resolve_codex())
         started = time.monotonic()
         try:
+            if self.model in SUBSCRIPTION_TEXT_MODELS:
+                from harvey.subscription_text import generate_text
+
+                model = await self._attested_text_account(server, deadline)
+                # Close the metadata runtime before any prompt is sent. There
+                # is no CLI process running that could execute model tools.
+                await server.close()
+                _, native = _load_native_auth(self.native_home)
+                return await generate_text(prompt, model, self.reasoning_effort,
+                                           build_access_snapshot(native), deadline)
             thread_id, model = await self._attested_thread(server, deadline)
 
             # Isolation verified — only now does untrusted text leave Harvey.

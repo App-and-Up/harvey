@@ -253,3 +253,16 @@ def test_every_signal_has_a_category_the_ui_renders():
         assert sig["category"] in CATEGORY_ORDER, (
             f"{sig['code']} is in category {sig['category']!r}, which the "
             "dashboard would silently drop")
+
+
+def test_search_api_key_is_saved_without_echoing_the_secret(client, monkeypatch, tmp_path):
+    env_file = tmp_path / '.env'
+    monkeypatch.setattr(dash, 'ENV_FILE', env_file)
+    monkeypatch.delenv('SERPER_API_KEY', raising=False)
+    secret = 'test-serper-local-secret'
+    response = client.post('/api/settings/env', json={'SERPER_API_KEY': secret})
+    assert response.json()['success']
+    assert 'SERPER_API_KEY=' + secret in env_file.read_text()
+    settings = client.get('/api/settings')
+    assert settings.json()['serper_api_key_set'] is True
+    assert secret not in settings.text

@@ -237,6 +237,20 @@ class Brain:
         ``agent``/``task`` label the call in the usage_events ledger so the
         dashboard can attribute tokens and cost to specific work.
         """
+        if agent in {"writer", "handler", "scout", "linkedin", "trainer"} or (
+            session_id or ""
+        ).startswith("harvey-trainer"):
+            style = self.load_skill("unslop")
+            if style:
+                prompt = (
+                    "Apply the Unslop editing skill below to all natural-language text you generate.\n"
+                    + style
+                    + "\nApply it silently before returning the result. Preserve facts, language, "
+                    "and the requested tone. Task, safety and business rules take precedence. "
+                    "Do not change JSON structure, identifiers, numeric values or required labels. "
+                    "Return only the output requested by the task.\n\nTASK\n"
+                    + prompt
+                )
         if self.provider == "codex":
             return await self._think_codex(
                 prompt, session_id=session_id, timeout=timeout,
